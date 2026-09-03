@@ -688,6 +688,8 @@ function formatPokerCard(card) {
   return `${rank}${suits[suit] || suit}`
 }
 
+const HOST_SESSION_KEY = 'thePotHostSession'
+
 function App() {
   const [screen, setScreen] = useState('home')
 
@@ -714,6 +716,7 @@ function App() {
   const [joinedRound, setJoinedRound] = useState(null)
 
   const [loading, setLoading] = useState(false)
+  const [recoveringHost, setRecoveringHost] = useState(true)
   const [createdRound, setCreatedRound] = useState(null)
   const [error, setError] = useState('')
 
@@ -733,6 +736,143 @@ function App() {
   const [pokerResults, setPokerResults] = useState([])
   const [pokerSelections, setPokerSelections] = useState({})
   const [viewerPokerResults, setViewerPokerResults] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function recoverHostRound() {
+      const rawSession = localStorage.getItem(HOST_SESSION_KEY)
+
+      if (!rawSession) {
+        if (!cancelled) setRecoveringHost(false)
+        return
+      }
+
+      try {
+        const session = JSON.parse(rawSession)
+
+        if (!session?.roundId || !session?.hostToken) {
+          localStorage.removeItem(HOST_SESSION_KEY)
+          if (!cancelled) setRecoveringHost(false)
+          return
+        }
+
+        const { data: round, error: roundError } = await supabase
+          .from('rounds')
+          .select('*')
+          .eq('id', session.roundId)
+          .eq('host_token', session.hostToken)
+          .maybeSingle()
+
+        if (roundError) throw roundError
+
+        if (!round) {
+          localStorage.removeItem(HOST_SESSION_KEY)
+          if (!cancelled) setRecoveringHost(false)
+          return
+        }
+
+        const [
+          playersResponse,
+          gamesResponse,
+          wolfResponse,
+          skinsResponse,
+          pokerResponse
+        ] = await Promise.all([
+          supabase
+            .from('players')
+            .select('*')
+            .eq('round_id', round.id)
+            .order('player_order'),
+          supabase
+            .from('round_games')
+            .select('*')
+            .eq('round_id', round.id),
+          supabase
+            .from('wolf_results')
+            .select('*')
+            .eq('round_id', round.id)
+            .order('created_at', { ascending: true }),
+          supabase
+            .from('skins_results')
+            .select('*')
+            .eq('round_id', round.id)
+            .order('created_at', { ascending: true }),
+          supabase
+            .from('poker_results')
+            .select('*')
+            .eq('round_id', round.id)
+            .order('created_at', { ascending: true })
+        ])
+
+        const firstError = [
+          playersResponse.error,
+          gamesResponse.error,
+          wolfResponse.error,
+          skinsResponse.error,
+          pokerResponse.error
+        ].find(Boolean)
+
+        if (firstError) throw firstError
+        if (cancelled) return
+
+        const recoveredRound = {
+          ...round,
+          players: playersResponse.data || [],
+          games: gamesResponse.data || []
+        }
+
+        const sequence = buildHoleSequence(round.starting_hole)
+
+        let holeIndex = sequence.findIndex(
+          hole => Number(hole) === Number(round.current_hole)
+        )
+
+        if (holeIndex < 0) holeIndex = 0
+        if (round.status === 'completed') holeIndex = 18
+
+        setActiveRound({
+          ...recoveredRound,
+          holeSequence: sequence,
+          holeIndex
+        })
+
+        setCreatedRound(recoveredRound)
+        setWolfResults(wolfResponse.data || [])
+        setSkinsResults(skinsResponse.data || [])
+        setPokerResults(pokerResponse.data || [])
+
+        if (round.status !== 'completed') {
+          const scheduledWolf = getScheduledWolf(
+            recoveredRound.players,
+            holeIndex
+          )
+
+          setWolfPlayerId(scheduledWolf?.id || '')
+          setPartnerPlayerId('')
+          setWolfResult('win')
+          setScoreType('normal')
+          setSkinsWinnerId('')
+          setPokerSelections(
+            makePokerSelections(recoveredRound.players)
+          )
+        }
+
+        setScreen('round')
+      } catch (err) {
+        console.error('Host recovery failed:', err)
+        localStorage.removeItem(HOST_SESSION_KEY)
+      } finally {
+        if (!cancelled) setRecoveringHost(false)
+      }
+    }
+
+    recoverHostRound()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
   if (screen !== 'live-viewer' || !joinedRound?.id) {
@@ -1775,6 +1915,17 @@ function formatMoney(value) {
   const sequence = buildHoleSequence(round.starting_hole)
   const scheduledWolf = getScheduledWolf(round.players, 0)
 
+  if (round.id && round.host_token) {
+    localStorage.setItem(
+      HOST_SESSION_KEY,
+      JSON.stringify({
+        roundId: round.id,
+        hostToken: round.host_token,
+        roundCode: round.round_code
+      })
+    )
+  }
+
   setActiveRound({
     ...round,
     holeSequence: sequence,
@@ -1893,6 +2044,15 @@ function formatMoney(value) {
         .insert(gameRows)
 
       if (gamesError) throw gamesError
+
+      localStorage.setItem(
+        HOST_SESSION_KEY,
+        JSON.stringify({
+          roundId: round.id,
+          hostToken: round.host_token,
+          roundCode: round.round_code
+        })
+      )
 
       setCreatedRound({
         ...round,
@@ -2056,6 +2216,28 @@ function formatMoney(value) {
   }
 }
 
+  if (recoveringHost) {
+    return (
+      <main className="app-shell">
+        <section className="create-shell">
+          <img
+            src="/brand/the-pot-logo.png"
+            alt="THE POT"
+            className="brand-logo"
+          />
+
+          <div className="success-card">
+            <p className="eyebrow">THE POT</p>
+            <h2>Restoring your round...</h2>
+            <p className="success-copy">
+              Checking for an active host session on this device.
+            </p>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
   if (screen === 'home') {
     return (
       <main className="app-shell">
@@ -2070,9 +2252,9 @@ function formatMoney(value) {
             <p className="eyebrow">GOLF SIDE GAMES</p>
 
             <h1>
-              <span>Good golf.</span>
+              <span>GOOD GOLF.</span>
               <br />
-              <span className="hero-punchline">Bad decisions.</span>
+              <span className="hero-punchline">BAD DECISIONS.</span>
             </h1>
 
             <p className="intro">
