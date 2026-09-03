@@ -1,0 +1,17 @@
+{
+  "name": "THE POT",
+  "short_name": "THE POT",
+  "description": "Golf side games for the Saturday group.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#102A23",
+  "theme_color": "#102A23",
+  "icons": [
+    {
+      "src": "/brand/the-pot-app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
