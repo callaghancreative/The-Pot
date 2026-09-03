@@ -2070,13 +2070,14 @@ function formatMoney(value) {
             <p className="eyebrow">GOLF SIDE GAMES</p>
 
             <h1>
-              Play for pride.
+              <span>Good golf.</span>
               <br />
-              Settle the pot.
+              <span className="hero-punchline">Bad decisions.</span>
             </h1>
 
             <p className="intro">
-              Create a new round or join one already underway.
+              Wolf. Skins. 3-Putt Poker.<br />
+              Keep the games running and the group honest.
             </p>
 
             <div className="actions">
