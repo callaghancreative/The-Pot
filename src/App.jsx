@@ -1059,6 +1059,41 @@ function App() {
     })
   }
 
+  function leaveRound() {
+    const shouldLeave = window.confirm(
+      'Leave this round on this device? The round will remain saved, but this device will stop automatically restoring it.'
+    )
+
+    if (!shouldLeave) return
+
+    localStorage.removeItem(HOST_SESSION_KEY)
+
+    setActiveRound(null)
+    setCreatedRound(null)
+    setJoinedRound(null)
+
+    setWolfResults([])
+    setSkinsResults([])
+    setPokerResults([])
+
+    setViewerWolfResults([])
+    setViewerSkinsResults([])
+    setViewerPokerResults([])
+
+    setWolfPlayerId('')
+    setPartnerPlayerId('')
+    setWolfResult('win')
+    setScoreType('normal')
+    setSkinsWinnerId('')
+    setPokerSelections({})
+
+    setJoinCode('')
+    setError('')
+    setScreen('home')
+
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function saveHole() {
   if (!activeRound) return
 
@@ -1364,6 +1399,13 @@ function App() {
 
     setSkinsWinnerId('')
     setPokerSelections(makePokerSelections(activeRound.players))
+
+    requestAnimationFrame(() => {
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      })
+    })
 
   } catch (err) {
     console.error(err)
@@ -2252,9 +2294,9 @@ function formatMoney(value) {
             <p className="eyebrow">GOLF SIDE GAMES</p>
 
             <h1>
-              <span>GOOD GOLF.</span>
+              <span>Good golf.</span>
               <br />
-              <span className="hero-punchline">BAD DECISIONS.</span>
+              <span className="hero-punchline">Bad decisions.</span>
             </h1>
 
             <p className="intro">
@@ -2914,245 +2956,16 @@ function formatMoney(value) {
           </div>
         </div>
 
-        {hasWolf && (
-          <>
-            <div className="viewer-section-title">
-              <span>Wolf Standings</span>
-              <span>Points</span>
-            </div>
+        <button
+          type="button"
+          className="secondary-button spaced-action-button"
+          onClick={leaveRound}
+          disabled={loading}
+        >
+          Leave Round
+        </button>
 
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => (
-                <div
-                  key={player.id}
-                  className="score-row"
-                >
-                  <span>{player.name}</span>
-                  <strong>
-                    {totals[player.id] > 0 ? '+' : ''}
-                    {totals[player.id] || 0}
-                  </strong>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {hasSkins && (
-          <>
-            <div className="viewer-section-title">
-              <span>Skins Standings</span>
-              <span>Skins Won</span>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => (
-                <div
-                  key={player.id}
-                  className="score-row"
-                >
-                  <span>{player.name}</span>
-                  <strong>{skinsTotals[player.id] || 0}</strong>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {hasPoker && (
-          <>
-            <div className="viewer-section-title">
-              <span>3-Putt Poker</span>
-              <span>
-                ${Number(pokerSettings.buyIn || 0)} buy-in · ${Number(pokerSettings.fineValue || 0)} / fine
-              </span>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => {
-                const pokerTotal = pokerTotals[player.id] || {
-                  cards: 0,
-                  fines: 0
-                }
-
-                const cards =
-                  pokerHands[player.id] || []
-
-                const bestHand =
-                  getBestPokerHand(cards)
-
-                return (
-                  <div
-                    key={player.id}
-                    className="score-row"
-                  >
-                    <span>
-                      {player.name}
-                      <small className="viewer-note">
-                        {cards.length
-                          ? ` · ${cards.map(formatPokerCard).join(' ')}`
-                          : ' · No cards yet'}
-                      </small>
-                    </span>
-
-                    <strong>
-                      {bestHand
-                        ? bestHand.name
-                        : `${pokerTotal.cards} cards`}
-                      {' · '}
-                      {pokerTotal.fines} fines
-                    </strong>
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        )}
-
-        <div className="viewer-section-title">
-          <span>{finished ? 'Final Pot' : 'Live Pot'}</span>
-          <span>
-            {finished ? 'Final balance' : 'Current position'}
-          </span>
-        </div>
-
-        <div className="scoreboard-card">
-          {activeRound.players.map(player => {
-            const position =
-              combinedPositions[player.id] || {
-                wolf: 0,
-                skins: 0,
-                poker: 0,
-                total: 0
-              }
-
-            return (
-              <div
-                key={player.id}
-                className="score-row"
-              >
-                <span>
-                  {player.name}
-                  <small className="viewer-note">
-                    {hasWolf
-                      ? ` · Wolf ${formatMoney(position.wolf)}`
-                      : ''}
-                    {hasSkins
-                      ? ` · Skins ${formatMoney(position.skins)}`
-                      : ''}
-                    {hasPoker
-                      ? ` · Poker ${formatMoney(position.poker)}`
-                      : ''}
-                  </small>
-                </span>
-
-                <strong>
-                  {formatMoney(position.total)}
-                </strong>
-              </div>
-            )
-          })}
-        </div>
-
-        {finished ? (
-          <>
-            <div className="success-card">
-              <p className="eyebrow">ROUND COMPLETE</p>
-              <h2>The pot is settled.</h2>
-            </div>
-
-            {settlementPayments.length > 0 && (
-              <>
-                <div className="viewer-section-title">
-                  <span>Settle Up</span>
-                  <span>
-                    {settlementPayments.length}{' '}
-                    {settlementPayments.length === 1
-                      ? 'payment'
-                      : 'payments'}
-                  </span>
-                </div>
-
-                <div className="scoreboard-card">
-                  {settlementPayments.map(
-                    (payment, index) => (
-                      <div
-                        key={`${payment.from.id}-${payment.to.id}-${index}`}
-                        className="score-row"
-                      >
-                        <span>
-                          {payment.from.name} pays{' '}
-                          {payment.to.name}
-                        </span>
-
-                        <strong>
-                          ${payment.amount.toFixed(2)}
-                        </strong>
-                      </div>
-                    )
-                  )}
-                </div>
-              </>
-            )}
-
-            {hasPoker &&
-              pokerSettlement?.outcome?.status === 'winner' && (
-                <div className="success-card">
-                  <p className="eyebrow">
-                    POKER WINNER
-                  </p>
-
-                  <h2>
-                    {pokerSettlement.outcome.winner.player.name}
-                    {' · '}
-                    {pokerSettlement.outcome.winner.hand.name}
-                  </h2>
-
-                  <p className="success-copy">
-                    Winning hand:{' '}
-                    {pokerSettlement.outcome.winner.hand.cards
-                      .map(formatPokerCard)
-                      .join(' ')}
-                  </p>
-
-                  <div className="player-list">
-                    {pokerSettlement.payments.map(payment => (
-                      <div
-                        key={payment.player.id}
-                        className="player-pill"
-                      >
-                        {payment.player.name} owes $
-                        {payment.total.toFixed(2)}
-                      </div>
-                    ))}
-                  </div>
-
-                  <p className="success-copy">
-                    Total received: $
-                    {pokerSettlement.winnerReceives.toFixed(2)}
-                  </p>
-                </div>
-              )}
-
-            {hasPoker &&
-              pokerOutcome?.status === 'tie' && (
-                <div className="error-message">
-                  Poker finished in an exact tie between{' '}
-                  {pokerOutcome.winners
-                    .map(item => item.player.name)
-                    .join(' and ')}.
-                  Settle the Poker pot manually.
-                </div>
-              )}
-
-            {hasPoker &&
-              pokerOutcome?.status === 'no-winner' && (
-                <div className="error-message">
-                  No player has five Poker cards, so there is no automatic Poker winner.
-                </div>
-              )}
-          </>
-        ) : (
+        {!finished && (
           <div className="form-card">
 
   {/* WOLF */}
@@ -3491,12 +3304,252 @@ function formatMoney(value) {
   </button>
 
             </div>
-          )}
+        )}
+
+        {hasWolf && (
+          <>
+            <div className="viewer-section-title">
+              <span>Wolf Standings</span>
+              <span>Points</span>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map(player => (
+                <div
+                  key={player.id}
+                  className="score-row"
+                >
+                  <span>{player.name}</span>
+                  <strong>
+                    {totals[player.id] > 0 ? '+' : ''}
+                    {totals[player.id] || 0}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {hasSkins && (
+          <>
+            <div className="viewer-section-title">
+              <span>Skins Standings</span>
+              <span>Skins Won</span>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map(player => (
+                <div
+                  key={player.id}
+                  className="score-row"
+                >
+                  <span>{player.name}</span>
+                  <strong>{skinsTotals[player.id] || 0}</strong>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {hasPoker && (
+          <>
+            <div className="viewer-section-title">
+              <span>3-Putt Poker</span>
+              <span>
+                ${Number(pokerSettings.buyIn || 0)} buy-in · ${Number(pokerSettings.fineValue || 0)} / fine
+              </span>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map(player => {
+                const pokerTotal = pokerTotals[player.id] || {
+                  cards: 0,
+                  fines: 0
+                }
+
+                const cards =
+                  pokerHands[player.id] || []
+
+                const bestHand =
+                  getBestPokerHand(cards)
+
+                return (
+                  <div
+                    key={player.id}
+                    className="score-row"
+                  >
+                    <span>
+                      {player.name}
+                      <small className="viewer-note">
+                        {cards.length
+                          ? ` · ${cards.map(formatPokerCard).join(' ')}`
+                          : ' · No cards yet'}
+                      </small>
+                    </span>
+
+                    <strong>
+                      {bestHand
+                        ? bestHand.name
+                        : `${pokerTotal.cards} cards`}
+                      {' · '}
+                      {pokerTotal.fines} fines
+                    </strong>
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+
+        <div className="viewer-section-title">
+          <span>{finished ? 'Final Pot' : 'Live Pot'}</span>
+          <span>
+            {finished ? 'Final balance' : 'Current position'}
+          </span>
+        </div>
+
+        <div className="scoreboard-card">
+          {activeRound.players.map(player => {
+            const position =
+              combinedPositions[player.id] || {
+                wolf: 0,
+                skins: 0,
+                poker: 0,
+                total: 0
+              }
+
+            return (
+              <div
+                key={player.id}
+                className="score-row"
+              >
+                <span>
+                  {player.name}
+                  <small className="viewer-note">
+                    {hasWolf
+                      ? ` · Wolf ${formatMoney(position.wolf)}`
+                      : ''}
+                    {hasSkins
+                      ? ` · Skins ${formatMoney(position.skins)}`
+                      : ''}
+                    {hasPoker
+                      ? ` · Poker ${formatMoney(position.poker)}`
+                      : ''}
+                  </small>
+                </span>
+
+                <strong>
+                  {formatMoney(position.total)}
+                </strong>
+              </div>
+            )
+          })}
+        </div>
+
+        {finished && (
+          <>
+            <div className="success-card">
+              <p className="eyebrow">ROUND COMPLETE</p>
+              <h2>The pot is settled.</h2>
+            </div>
+
+            {settlementPayments.length > 0 && (
+              <>
+                <div className="viewer-section-title">
+                  <span>Settle Up</span>
+                  <span>
+                    {settlementPayments.length}{' '}
+                    {settlementPayments.length === 1
+                      ? 'payment'
+                      : 'payments'}
+                  </span>
+                </div>
+
+                <div className="scoreboard-card">
+                  {settlementPayments.map(
+                    (payment, index) => (
+                      <div
+                        key={`${payment.from.id}-${payment.to.id}-${index}`}
+                        className="score-row"
+                      >
+                        <span>
+                          {payment.from.name} pays{' '}
+                          {payment.to.name}
+                        </span>
+
+                        <strong>
+                          ${payment.amount.toFixed(2)}
+                        </strong>
+                      </div>
+                    )
+                  )}
+                </div>
+              </>
+            )}
+
+            {hasPoker &&
+              pokerSettlement?.outcome?.status === 'winner' && (
+                <div className="success-card">
+                  <p className="eyebrow">
+                    POKER WINNER
+                  </p>
+
+                  <h2>
+                    {pokerSettlement.outcome.winner.player.name}
+                    {' · '}
+                    {pokerSettlement.outcome.winner.hand.name}
+                  </h2>
+
+                  <p className="success-copy">
+                    Winning hand:{' '}
+                    {pokerSettlement.outcome.winner.hand.cards
+                      .map(formatPokerCard)
+                      .join(' ')}
+                  </p>
+
+                  <div className="player-list">
+                    {pokerSettlement.payments.map(payment => (
+                      <div
+                        key={payment.player.id}
+                        className="player-pill"
+                      >
+                        {payment.player.name} owes $
+                        {payment.total.toFixed(2)}
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="success-copy">
+                    Total received: $
+                    {pokerSettlement.winnerReceives.toFixed(2)}
+                  </p>
+                </div>
+              )}
+
+            {hasPoker &&
+              pokerOutcome?.status === 'tie' && (
+                <div className="error-message">
+                  Poker finished in an exact tie between{' '}
+                  {pokerOutcome.winners
+                    .map(item => item.player.name)
+                    .join(' and ')}.
+                  Settle the Poker pot manually.
+                </div>
+              )}
+
+            {hasPoker &&
+              pokerOutcome?.status === 'no-winner' && (
+                <div className="error-message">
+                  No player has five Poker cards, so there is no automatic Poker winner.
+                </div>
+              )}
+          </>
+        )}
 
         {(finished || activeRound.holeIndex > 0) && (
           <button
             type="button"
-            className="secondary-button"
+            className="secondary-button spaced-action-button"
             onClick={undoLastHole}
             disabled={loading}
           >
