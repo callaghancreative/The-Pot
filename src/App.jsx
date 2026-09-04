@@ -2584,7 +2584,7 @@ function formatMoney(value) {
             
             <button
               className="primary-button"
-              onClick={openLiveViewer}
+              onClick={() => openLiveViewer()}
               disabled={loading}
             >
               {loading ? 'Loading...' : 'View Live Round'}
