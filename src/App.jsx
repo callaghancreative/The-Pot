@@ -24,6 +24,24 @@ function getSkinsSettings(round) {
   )
 }
 
+function getSkinsTeams(round) {
+  const settings = getSkinsSettings(round)
+  if (settings.mode !== 'team') return []
+
+  const teamOneOrders = settings.teamOneOrders || [1, 2]
+  const teamTwoOrders = settings.teamTwoOrders || [3, 4]
+
+  const makeTeam = (id, orders) => {
+    const players = orders
+      .map(order => round.players.find(player => Number(player.player_order) === Number(order)))
+      .filter(Boolean)
+
+    return { id, players, label: players.map(player => player.name).join(' + ') }
+  }
+
+  return [makeTeam('team1', teamOneOrders), makeTeam('team2', teamTwoOrders)]
+}
+
 function getCurrentSkinsValue(round, results) {
   const settings = getSkinsSettings(round)
 
@@ -46,21 +64,27 @@ function getCurrentSkinsValue(round, results) {
 
 function calculateSkinsTotals(round, results) {
   const totals = {}
+  const settings = getSkinsSettings(round)
 
-  round.players.forEach(player => {
-    totals[player.id] = 0
-  })
+  round.players.forEach(player => { totals[player.id] = 0 })
+
+  if (settings.mode === 'team') {
+    const teams = getSkinsTeams(round)
+    results.forEach(result => {
+      if (!result.winner_team || Number(result.skins_won) <= 0) return
+      const winningTeam = teams.find(team => team.id === result.winner_team)
+      winningTeam?.players.forEach(player => {
+        totals[player.id] += Number(result.skins_won)
+      })
+    })
+    return totals
+  }
 
   results.forEach(result => {
-    if (
-      result.winner_player_id &&
-      Number(result.skins_won) > 0
-    ) {
-      totals[result.winner_player_id] +=
-        Number(result.skins_won)
+    if (result.winner_player_id && Number(result.skins_won) > 0) {
+      totals[result.winner_player_id] += Number(result.skins_won)
     }
   })
-
   return totals
 }
 
@@ -728,6 +752,7 @@ function App() {
   const [eagleMultiplier, setEagleMultiplier] = useState(3)
 
   const [skinsMode, setSkinsMode] = useState('individual')
+  const [skinsTeamPairing, setSkinsTeamPairing] = useState('12v34')
   const [skinsDollar, setSkinsDollar] = useState(5)
   const [skinsCarryovers, setSkinsCarryovers] = useState(true)
 
@@ -1276,6 +1301,7 @@ function App() {
           skinsResults
         )
 
+      const isTeamSkins = skinsSettings.mode === 'team'
       const isTie = skinsWinnerId === ''
 
       const skinsWon = isTie
@@ -1287,8 +1313,8 @@ function App() {
       const skinsRow = {
         round_id: activeRound.id,
         hole: currentHole,
-        winner_player_id:
-          skinsWinnerId || null,
+        winner_player_id: !isTeamSkins && skinsWinnerId ? skinsWinnerId : null,
+        winner_team: isTeamSkins && skinsWinnerId ? skinsWinnerId : null,
         skins_won: skinsWon
       }
 
@@ -1627,7 +1653,7 @@ function App() {
       )
 
       setSkinsWinnerId(
-        previousSkinsResult?.winner_player_id || ''
+        previousSkinsResult?.winner_team || previousSkinsResult?.winner_player_id || ''
       )
 
       const restoredPokerSelections =
@@ -1830,32 +1856,31 @@ function calculateSkinsDollarPositions(round, results) {
   const settings = getSkinsSettings(round)
   const dollarsPerSkin = Number(settings.dollarsPerSkin || 0)
   const positions = {}
+  round.players.forEach(player => { positions[player.id] = 0 })
 
-  round.players.forEach(player => {
-    positions[player.id] = 0
-  })
+  if (settings.mode === 'team') {
+    const teams = getSkinsTeams(round)
+    results.forEach(result => {
+      if (!result.winner_team || Number(result.skins_won || 0) <= 0) return
+      const winningTeam = teams.find(team => team.id === result.winner_team)
+      const losingTeam = teams.find(team => team.id !== result.winner_team)
+      if (!winningTeam || !losingTeam) return
+      const amount = Number(result.skins_won) * dollarsPerSkin
+      winningTeam.players.forEach(player => { positions[player.id] += amount })
+      losingTeam.players.forEach(player => { positions[player.id] -= amount })
+    })
+    return positions
+  }
 
   results.forEach(result => {
-    if (
-      !result.winner_player_id ||
-      Number(result.skins_won || 0) <= 0
-    ) {
-      return
-    }
-
-    const amountPerOpponent =
-      Number(result.skins_won) * dollarsPerSkin
-
+    if (!result.winner_player_id || Number(result.skins_won || 0) <= 0) return
+    const amountPerOpponent = Number(result.skins_won) * dollarsPerSkin
     round.players.forEach(player => {
-      if (player.id === result.winner_player_id) {
-        return
-      }
-
+      if (player.id === result.winner_player_id) return
       positions[player.id] -= amountPerOpponent
       positions[result.winner_player_id] += amountPerOpponent
     })
   })
-
   return positions
 }
 
@@ -2084,6 +2109,11 @@ function formatMoney(value) {
       return
     }
 
+    if (skinsEnabled && skinsMode === 'team' && playerCount !== 4) {
+      setError('Team Skins requires exactly 4 players.')
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -2138,7 +2168,13 @@ function formatMoney(value) {
           settings: {
             mode: skinsMode,
             dollarsPerSkin: Number(skinsDollar),
-            carryovers: skinsCarryovers
+            carryovers: skinsCarryovers,
+            ...(skinsMode === 'team'
+              ? {
+                  teamOneOrders: skinsTeamPairing === '12v34' ? [1, 2] : skinsTeamPairing === '13v24' ? [1, 3] : [1, 4],
+                  teamTwoOrders: skinsTeamPairing === '12v34' ? [3, 4] : skinsTeamPairing === '13v24' ? [2, 4] : [2, 3]
+                }
+              : {})
           }
         })
       }
@@ -2699,16 +2735,66 @@ function formatMoney(value) {
             </div>
 
             <div className="scoreboard-card">
-              {joinedRound.players.map(player => (
-                <div
-                  key={player.id}
-                  className="score-row"
-                >
-                  <span>{player.name}</span>
-                  <strong>{viewerSkinsTotals[player.id] || 0}</strong>
-                </div>
-              ))}
+              {viewerSkinsSettings.mode === 'team'
+                ? getSkinsTeams(joinedRound).map(team => {
+                    const teamSkins = team.players.length
+                      ? viewerSkinsTotals[team.players[0].id] || 0
+                      : 0
+
+                    return (
+                      <div
+                        key={team.id}
+                        className="score-row"
+                      >
+                        <span>{team.label}</span>
+                        <strong>
+                          {teamSkins} {teamSkins === 1 ? 'skin' : 'skins'}
+                        </strong>
+                      </div>
+                    )
+                  })
+                : joinedRound.players.map(player => (
+                    <div
+                      key={player.id}
+                      className="score-row"
+                    >
+                      <span>{player.name}</span>
+                      <strong>{viewerSkinsTotals[player.id] || 0}</strong>
+                    </div>
+                  ))}
             </div>
+
+            {viewerSkinsSettings.mode === 'team' && viewerSkinsResults.length > 0 && (
+              <>
+                <div className="viewer-section-title">
+                  <span>Skins Results</span>
+                  <span>Hole by hole</span>
+                </div>
+
+                <div className="scoreboard-card">
+                  {viewerSkinsResults.map(result => {
+                    const winningTeam = getSkinsTeams(joinedRound).find(
+                      team => team.id === result.winner_team
+                    )
+                    const skinsWon = Number(result.skins_won || 0)
+
+                    return (
+                      <div
+                        key={result.id}
+                        className="score-row"
+                      >
+                        <span>Hole {result.hole}</span>
+                        <strong>
+                          {winningTeam
+                            ? `${winningTeam.label} · ${skinsWon} ${skinsWon === 1 ? 'skin' : 'skins'}`
+                            : 'Tie'}
+                        </strong>
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </>
         )}
 
@@ -3296,22 +3382,27 @@ function formatMoney(value) {
           Tie
         </button>
 
-        {activeRound.players.map(player => (
-          <button
-            key={player.id}
-            type="button"
-            className={
-              skinsWinnerId === player.id
-                ? 'choice-button active'
-                : 'choice-button'
-            }
-            onClick={() =>
-              setSkinsWinnerId(player.id)
-            }
-          >
-            {player.name}
-          </button>
-        ))}
+        {getSkinsSettings(activeRound).mode === 'team'
+          ? getSkinsTeams(activeRound).map(team => (
+              <button
+                key={team.id}
+                type="button"
+                className={skinsWinnerId === team.id ? 'choice-button active' : 'choice-button'}
+                onClick={() => setSkinsWinnerId(team.id)}
+              >
+                {team.label}
+              </button>
+            ))
+          : activeRound.players.map(player => (
+              <button
+                key={player.id}
+                type="button"
+                className={skinsWinnerId === player.id ? 'choice-button active' : 'choice-button'}
+                onClick={() => setSkinsWinnerId(player.id)}
+              >
+                {player.name}
+              </button>
+            ))}
       </div>
 
       <div className="skins-mini-scoreboard">
@@ -3852,6 +3943,18 @@ function formatMoney(value) {
                     <option value="team">Team</option>
                   </select>
                 </label>
+
+                {skinsMode === 'team' && (
+                  <label>
+                    Teams
+                    <select value={skinsTeamPairing} onChange={e => setSkinsTeamPairing(e.target.value)}>
+                      <option value="12v34">{(players[0] || 'Player 1')} + {(players[1] || 'Player 2')} vs {(players[2] || 'Player 3')} + {(players[3] || 'Player 4')}</option>
+                      <option value="13v24">{(players[0] || 'Player 1')} + {(players[2] || 'Player 3')} vs {(players[1] || 'Player 2')} + {(players[3] || 'Player 4')}</option>
+                      <option value="14v23">{(players[0] || 'Player 1')} + {(players[3] || 'Player 4')} vs {(players[1] || 'Player 2')} + {(players[2] || 'Player 3')}</option>
+                    </select>
+                    {playerCount !== 4 && <span className="field-note">Team Skins requires 4 players.</span>}
+                  </label>
+                )}
 
                 <label>
                   $ / Skin
