@@ -927,3 +927,23 @@ select option {
     font-size: 0.9rem;
   }
 }
+
+/* THE POT — vertically centred landing page */
+
+.home-shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  .home-shell {
+    min-height: 100dvh;
+    justify-content: center;
+    padding-top: 24px;
+    padding-bottom: 24px;
+  }
+}
