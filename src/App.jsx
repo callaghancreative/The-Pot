@@ -690,6 +690,28 @@ function formatPokerCard(card) {
 
 const HOST_SESSION_KEY = 'thePotHostSession'
 
+async function ensureAnonymousUser() {
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession()
+
+  if (sessionError) throw sessionError
+  if (session?.user) return session.user
+
+  const {
+    data,
+    error: signInError
+  } = await supabase.auth.signInAnonymously()
+
+  if (signInError) throw signInError
+  if (!data?.user) {
+    throw new Error('Could not create a guest session.')
+  }
+
+  return data.user
+}
+
 function App() {
   const [screen, setScreen] = useState('home')
 
@@ -716,6 +738,7 @@ function App() {
   const [joinedRound, setJoinedRound] = useState(null)
 
   const [loading, setLoading] = useState(false)
+  const [shareStatus, setShareStatus] = useState('')
   const [recoveringHost, setRecoveringHost] = useState(true)
   const [createdRound, setCreatedRound] = useState(null)
   const [error, setError] = useState('')
@@ -749,6 +772,7 @@ function App() {
       }
 
       try {
+        const hostUser = await ensureAnonymousUser()
         const session = JSON.parse(rawSession)
 
         if (!session?.roundId || !session?.hostToken) {
@@ -762,6 +786,7 @@ function App() {
           .select('*')
           .eq('id', session.roundId)
           .eq('host_token', session.hostToken)
+          .eq('host_user_id', hostUser.id)
           .maybeSingle()
 
         if (roundError) throw roundError
@@ -873,6 +898,52 @@ function App() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (recoveringHost || screen !== 'home') return
+
+    const params = new URLSearchParams(window.location.search)
+    const code = (params.get('round') || '').trim().toUpperCase()
+
+    if (!/^[A-Z0-9]{4}$/.test(code)) return
+
+    let cancelled = false
+
+    async function openSharedRound() {
+      setError('')
+      setLoading(true)
+
+      try {
+        const round = await fetchRoundByCode(code)
+
+        if (cancelled) return
+
+        if (!round) {
+          setJoinCode(code)
+          setError('Round not found.')
+          setScreen('join')
+          return
+        }
+
+        setJoinedRound(round)
+        await openLiveViewer(round)
+      } catch (err) {
+        if (cancelled) return
+        console.error(err)
+        setJoinCode(code)
+        setError(err.message || 'Could not open the shared round.')
+        setScreen('join')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    openSharedRound()
+
+    return () => {
+      cancelled = true
+    }
+  }, [recoveringHost])
 
   useEffect(() => {
   if (screen !== 'live-viewer' || !joinedRound?.id) {
@@ -2016,6 +2087,7 @@ function formatMoney(value) {
     setLoading(true)
 
     try {
+      const hostUser = await ensureAnonymousUser()
       const roundCode = await generateUniqueRoundCode()
 
       const { data: round, error: roundError } = await supabase
@@ -2024,7 +2096,8 @@ function formatMoney(value) {
           round_code: roundCode,
           starting_hole: Number(startingHole),
           current_hole: Number(startingHole),
-          status: 'active'
+          status: 'active',
+          host_user_id: hostUser.id
         })
         .select()
         .single()
@@ -2111,6 +2184,73 @@ function formatMoney(value) {
     }
   }
 
+  async function fetchRoundByCode(code) {
+    const { data: round, error: roundError } = await supabase
+      .from('rounds')
+      .select('*')
+      .eq('round_code', code)
+      .maybeSingle()
+
+    if (roundError) throw roundError
+    if (!round) return null
+
+    const { data: roundPlayers, error: playersError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('round_id', round.id)
+      .order('player_order')
+
+    if (playersError) throw playersError
+
+    const { data: games, error: gamesError } = await supabase
+      .from('round_games')
+      .select('*')
+      .eq('round_id', round.id)
+
+    if (gamesError) throw gamesError
+
+    return {
+      ...round,
+      players: roundPlayers || [],
+      games: games || []
+    }
+  }
+
+  function getRoundShareUrl(code) {
+    const url = new URL(window.location.origin)
+    url.searchParams.set('round', code)
+    return url.toString()
+  }
+
+  async function shareRound(code) {
+    const shareUrl = getRoundShareUrl(code)
+    setShareStatus('')
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'THE POT',
+          text: `Join my round on THE POT · ${code}`,
+          url: shareUrl
+        })
+        return
+      }
+
+      await navigator.clipboard.writeText(shareUrl)
+      setShareStatus('Link copied')
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+
+      try {
+        await navigator.clipboard.writeText(shareUrl)
+        setShareStatus('Link copied')
+      } catch (copyError) {
+        console.error(copyError)
+        setShareStatus(shareUrl)
+      }
+    }
+  }
+
   async function joinRound() {
     setError('')
 
@@ -2124,40 +2264,14 @@ function formatMoney(value) {
     setLoading(true)
 
     try {
-      const { data: round, error: roundError } = await supabase
-        .from('rounds')
-        .select('*')
-        .eq('round_code', code)
-        .maybeSingle()
-
-      if (roundError) throw roundError
+      const round = await fetchRoundByCode(code)
 
       if (!round) {
         setError('Round not found.')
         return
       }
 
-      const { data: roundPlayers, error: playersError } = await supabase
-        .from('players')
-        .select('*')
-        .eq('round_id', round.id)
-        .order('player_order')
-
-      if (playersError) throw playersError
-
-      const { data: games, error: gamesError } = await supabase
-        .from('round_games')
-        .select('*')
-        .eq('round_id', round.id)
-
-      if (gamesError) throw gamesError
-
-      setJoinedRound({
-        ...round,
-        players: roundPlayers,
-        games
-      })
-
+      setJoinedRound(round)
       setScreen('joined')
     } catch (err) {
       console.error(err)
@@ -2167,22 +2281,22 @@ function formatMoney(value) {
     }
   }
 
-  async function openLiveViewer() {
-  if (!joinedRound) return
+  async function openLiveViewer(roundToOpen = joinedRound) {
+  if (!roundToOpen) return
 
   setError('')
   setLoading(true)
 
   try {
-    const hasWolf = joinedRound.games.some(
+    const hasWolf = roundToOpen.games.some(
       game => game.game_type === 'wolf'
     )
 
-    const hasSkins = joinedRound.games.some(
+    const hasSkins = roundToOpen.games.some(
       game => game.game_type === 'skins'
     )
 
-    const hasPoker = joinedRound.games.some(
+    const hasPoker = roundToOpen.games.some(
       game => game.game_type === 'poker'
     )
 
@@ -2194,7 +2308,7 @@ function formatMoney(value) {
       const { data, error: resultsError } = await supabase
         .from('wolf_results')
         .select('*')
-        .eq('round_id', joinedRound.id)
+        .eq('round_id', roundToOpen.id)
         .order('created_at', { ascending: true })
 
       if (resultsError) throw resultsError
@@ -2206,7 +2320,7 @@ function formatMoney(value) {
       const { data, error: skinsError } = await supabase
         .from('skins_results')
         .select('*')
-        .eq('round_id', joinedRound.id)
+        .eq('round_id', roundToOpen.id)
         .order('created_at', { ascending: true })
 
       if (skinsError) throw skinsError
@@ -2218,7 +2332,7 @@ function formatMoney(value) {
       const { data, error: pokerError } = await supabase
         .from('poker_results')
         .select('*')
-        .eq('round_id', joinedRound.id)
+        .eq('round_id', roundToOpen.id)
         .order('created_at', { ascending: true })
 
       if (pokerError) throw pokerError
@@ -2232,7 +2346,7 @@ function formatMoney(value) {
       await supabase
         .from('rounds')
         .select('*')
-        .eq('id', joinedRound.id)
+        .eq('id', roundToOpen.id)
         .single()
 
     if (roundError) throw roundError
@@ -2283,7 +2397,7 @@ function formatMoney(value) {
   if (screen === 'home') {
     return (
       <main className="app-shell">
-        <section className="create-shell">
+        <section className="create-shell home-shell">
           <img
             src="/brand/the-pot-logo.png"
             alt="THE POT"
@@ -2834,12 +2948,27 @@ function formatMoney(value) {
               ))}
             </div>
 
-            <button
-              className="primary-button"
-              onClick={() => startRound(createdRound)}
-            >
-              Start Round
-            </button>
+            <div className="round-share-actions">
+              <button
+                className="secondary-button"
+                onClick={() => shareRound(createdRound.round_code)}
+                type="button"
+              >
+                Share Round
+              </button>
+
+              <button
+                className="primary-button"
+                onClick={() => startRound(createdRound)}
+                type="button"
+              >
+                Start Round
+              </button>
+            </div>
+
+            {shareStatus && (
+              <p className="share-status">{shareStatus}</p>
+            )}
           </div>
         </section>
       </main>
@@ -2951,10 +3080,24 @@ function formatMoney(value) {
             )}
           </div>
 
-          <div className="hole-progress">
-            {Math.min(activeRound.holeIndex + 1, 18)} / 18
+          <div className="round-topbar-actions">
+            <div className="hole-progress">
+              {Math.min(activeRound.holeIndex + 1, 18)} / 18
+            </div>
+
+            <button
+              type="button"
+              className="secondary-button active-share-button"
+              onClick={() => shareRound(activeRound.round_code)}
+            >
+              Share Round
+            </button>
           </div>
         </div>
+
+        {shareStatus && (
+          <p className="share-status active-share-status">{shareStatus}</p>
+        )}
 
         <button
           type="button"

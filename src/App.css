@@ -787,6 +787,143 @@ select option {
   color: var(--gold);
 }
 
+.create-header h1 {
+  letter-spacing: -0.045em;
+  line-height: 0.92;
+}
+
+.create-header h1 .hero-punchline {
+  color: #F5A900 !important;
+}
+
+.create-header .intro {
+  margin-top: 1.25rem;
+  line-height: 1.55;
+}
+
 .spaced-action-button {
   margin-top: 20px;
+}
+
+/* THE POT — centred home screen */
+
+.home-shell .brand-logo {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.home-shell .create-header {
+  text-align: center;
+}
+
+.home-shell .create-header .intro {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+.home-shell .actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+/* THE POT — mobile landing spacing */
+
+@media (max-width: 600px) {
+  .home-shell {
+    padding-top: 18px;
+    padding-bottom: 24px;
+  }
+
+  .home-shell .brand-logo {
+    width: 190px;
+    margin-bottom: 22px;
+  }
+
+  .home-shell .create-header .eyebrow {
+    margin-bottom: 8px;
+  }
+
+  .home-shell .create-header h1 {
+    margin-top: 0;
+    margin-bottom: 18px;
+    line-height: 0.94;
+  }
+
+  .home-shell .create-header .intro {
+    margin-top: 0;
+    margin-bottom: 22px;
+    line-height: 1.45;
+  }
+
+  .home-shell .actions {
+    gap: 10px;
+  }
+
+  .home-shell .actions button {
+    min-height: 48px;
+  }
+}
+
+/* THE POT — shareable round actions */
+.round-share-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.share-status {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 0.9rem;
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .round-share-actions {
+    width: 100%;
+  }
+
+  .round-share-actions button {
+    flex: 1;
+    min-height: 48px;
+  }
+}
+
+/* THE POT — active round sharing */
+
+.active-round-share {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.active-share-button {
+  width: auto;
+  min-height: 42px;
+  padding: 9px 16px;
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  .active-round-share {
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .active-share-button {
+    min-height: 40px;
+    padding: 8px 13px;
+    font-size: 0.9rem;
+  }
 }
