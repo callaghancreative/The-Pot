@@ -3216,7 +3216,7 @@ function formatMoney(value) {
                 className={selection.onePutt ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'onePutt')}
               >
-                1-Putt +1 Card
+                1-Putt
               </button>
 
               <button
@@ -3224,7 +3224,7 @@ function formatMoney(value) {
                 className={selection.nettBirdie ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'nettBirdie')}
               >
-                Nett Birdie +1 Card
+                Nett Birdie
               </button>
 
               <button
@@ -3232,7 +3232,7 @@ function formatMoney(value) {
                 className={selection.chipIn ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'chipIn')}
               >
-                Chip-In +2 Cards
+                Chip-In
               </button>
 
               <button
@@ -3240,7 +3240,7 @@ function formatMoney(value) {
                 className={selection.nettEagle ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'nettEagle')}
               >
-                Nett Eagle +2 Cards
+                Nett Eagle
               </button>
 
               <button
@@ -3248,7 +3248,7 @@ function formatMoney(value) {
                 className={selection.nettAlbatross ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'nettAlbatross')}
               >
-                Nett Albatross +3 Cards
+                Nett Albatross
               </button>
 
               <button
@@ -3256,7 +3256,7 @@ function formatMoney(value) {
                 className={selection.threePutt ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'threePutt')}
               >
-                3-Putt +1 Fine
+                3-Putt
               </button>
 
               <button
@@ -3264,7 +3264,7 @@ function formatMoney(value) {
                 className={selection.fourPutt ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'fourPutt')}
               >
-                4-Putt +2 Fines
+                4-Putt
               </button>
 
               <button
@@ -3272,7 +3272,7 @@ function formatMoney(value) {
                 className={selection.wipe ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'wipe')}
               >
-                Wipe +1 Fine
+                Wipe
               </button>
             </div>
 
