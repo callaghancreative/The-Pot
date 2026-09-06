@@ -1289,6 +1289,28 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  function leaveViewerRound() {
+    const shouldLeave = window.confirm(
+      'Leave this round? You can rejoin at any time using the round code.'
+    )
+
+    if (!shouldLeave) return
+
+    setJoinedRound(null)
+    setViewerWolfResults([])
+    setViewerSkinsResults([])
+    setViewerPokerResults([])
+    setJoinCode('')
+    setError('')
+
+    const cleanUrl = new URL(window.location.href)
+    cleanUrl.searchParams.delete('round')
+    window.history.replaceState({}, '', cleanUrl.toString())
+
+    setScreen('home')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function saveHole() {
   if (!activeRound) return
 
@@ -3014,6 +3036,15 @@ function formatMoney(value) {
               disabled={loading}
             >
               {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
+
+            <button
+              type="button"
+              className="secondary-button viewer-refresh-button"
+              onClick={leaveViewerRound}
+              disabled={loading}
+            >
+              Leave Round
             </button>
           </div>
         </div>
