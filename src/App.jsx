@@ -578,6 +578,104 @@ function getBestPokerHand(cards) {
   return best
 }
 
+
+function getBestDisplayPokerHand(cards) {
+  if (!cards.length) {
+    return null
+  }
+
+  if (cards.length >= 5) {
+    return getBestPokerHand(cards)
+  }
+
+  const ranks = cards
+    .map(cardRankValue)
+    .sort((a, b) => b - a)
+
+  const rankCounts = {}
+
+  ranks.forEach(rank => {
+    rankCounts[rank] =
+      (rankCounts[rank] || 0) + 1
+  })
+
+  const groups = Object.entries(rankCounts)
+    .map(([rank, count]) => ({
+      rank: Number(rank),
+      count
+    }))
+    .sort((a, b) => {
+      if (b.count !== a.count) {
+        return b.count - a.count
+      }
+
+      return b.rank - a.rank
+    })
+
+  if (groups[0].count === 4) {
+    return {
+      category: 7,
+      name: 'Four of a Kind',
+      tiebreak: [groups[0].rank],
+      cards
+    }
+  }
+
+  if (groups[0].count === 3) {
+    return {
+      category: 3,
+      name: 'Three of a Kind',
+      tiebreak: [
+        groups[0].rank,
+        ...groups
+          .slice(1)
+          .map(group => group.rank)
+          .sort((a, b) => b - a)
+      ],
+      cards
+    }
+  }
+
+  if (
+    groups[0].count === 2 &&
+    groups[1]?.count === 2
+  ) {
+    const pairRanks = [
+      groups[0].rank,
+      groups[1].rank
+    ].sort((a, b) => b - a)
+
+    return {
+      category: 2,
+      name: 'Two Pair',
+      tiebreak: pairRanks,
+      cards
+    }
+  }
+
+  if (groups[0].count === 2) {
+    return {
+      category: 1,
+      name: 'One Pair',
+      tiebreak: [
+        groups[0].rank,
+        ...groups
+          .slice(1)
+          .map(group => group.rank)
+          .sort((a, b) => b - a)
+      ],
+      cards
+    }
+  }
+
+  return {
+    category: 0,
+    name: 'High Card',
+    tiebreak: ranks,
+    cards
+  }
+}
+
 function getPokerOutcome(round, results) {
   const playerCards =
     calculatePokerHands(round, results)
@@ -586,7 +684,7 @@ function getPokerOutcome(round, results) {
     round.players.map(player => ({
       player,
       cards: playerCards[player.id] || [],
-      hand: getBestPokerHand(
+      hand: getBestDisplayPokerHand(
         playerCards[player.id] || []
       )
     }))
@@ -894,8 +992,9 @@ function App() {
 
         if (round.status !== 'completed') {
           const scheduledWolf = getScheduledWolf(
-            recoveredRound.players,
-            holeIndex
+            recoveredRound,
+            holeIndex,
+            wolfResponse.data || []
           )
 
           setWolfPlayerId(scheduledWolf?.id || '')
@@ -1475,8 +1574,11 @@ function App() {
     }
 
     const nextWolf = getScheduledWolf(
-      activeRound.players,
-      nextIndex
+      activeRound,
+      nextIndex,
+      newWolfResult
+        ? [...wolfResults, newWolfResult]
+        : wolfResults
     )
 
     setActiveRound({
@@ -1632,9 +1734,14 @@ function App() {
         holeIndex: undoIndex
       }))
 
+      const remainingWolfResults = wolfResults.filter(
+        result => Number(result.hole) !== Number(undoHole)
+      )
+
       const scheduledWolf = getScheduledWolf(
-        activeRound.players,
-        undoIndex
+        activeRound,
+        undoIndex,
+        remainingWolfResults
       )
 
       setWolfPlayerId(
@@ -1704,12 +1811,64 @@ function App() {
   return holes
 }
 
-function getScheduledWolf(players, holeIndex) {
-  if (!players?.length) return null
+function getScheduledWolf(round, holeIndex, results = []) {
+  const players = round?.players || []
 
-  // Wolf rotates through the player order.
-  // User can override this on an individual hole.
-  return players[holeIndex % players.length]
+  if (!players.length) return null
+
+  const playerCount = players.length
+  const equalRotationHoles =
+    Math.floor(18 / playerCount) * playerCount
+
+  // During the equal portion of the round, Wolf follows the
+  // normal player-order rotation. The scorer can still override
+  // the Wolf manually for an individual hole.
+  if (holeIndex < equalRotationHoles) {
+    return players[holeIndex % playerCount]
+  }
+
+  // Any holes left after every player has received the same
+  // number of scheduled Wolf turns become comeback holes.
+  // The player currently lowest in the Wolf standings gets Wolf.
+  const totals = calculateWolfPoints(round, results)
+  const lowestScore = Math.min(
+    ...players.map(player => totals[player.id] || 0)
+  )
+
+  const tiedLowest = players.filter(
+    player => (totals[player.id] || 0) === lowestScore
+  )
+
+  if (tiedLowest.length === 1) {
+    return tiedLowest[0]
+  }
+
+  // Tie-break: among players tied for last, give Wolf to the one
+  // who has gone longest since their most recent actual Wolf turn.
+  // A player who has never been Wolf is treated as having waited
+  // the longest. Player order is the final deterministic tie-break.
+  const lastWolfTurn = {}
+
+  players.forEach(player => {
+    lastWolfTurn[player.id] = -1
+  })
+
+  results.forEach((result, index) => {
+    if (result.wolf_player_id) {
+      lastWolfTurn[result.wolf_player_id] = index
+    }
+  })
+
+  return [...tiedLowest].sort((a, b) => {
+    const lastTurnDifference =
+      lastWolfTurn[a.id] - lastWolfTurn[b.id]
+
+    if (lastTurnDifference !== 0) {
+      return lastTurnDifference
+    }
+
+    return Number(a.player_order) - Number(b.player_order)
+  })[0]
 }
 
 function calculateWolfPoints(round, results) {
@@ -2051,7 +2210,7 @@ function formatMoney(value) {
   }
 
   const sequence = buildHoleSequence(round.starting_hole)
-  const scheduledWolf = getScheduledWolf(round.players, 0)
+  const scheduledWolf = getScheduledWolf(round, 0, [])
 
   if (round.id && round.host_token) {
     localStorage.setItem(
@@ -2395,6 +2554,11 @@ function formatMoney(value) {
     setViewerWolfResults(existingWolfResults)
     setViewerSkinsResults(existingSkinsResults)
     setViewerPokerResults(existingPokerResults)
+
+    const viewerUrl = new URL(window.location.href)
+    viewerUrl.searchParams.set('round', roundToOpen.round_code)
+    window.history.replaceState({}, '', viewerUrl.toString())
+
     setScreen('live-viewer')
 
   } catch (err) {
@@ -2407,6 +2571,151 @@ function formatMoney(value) {
     setLoading(false)
   }
 }
+
+
+  async function refreshHostRound() {
+    if (!activeRound?.id) return
+
+    setError('')
+    setLoading(true)
+
+    try {
+      const [
+        roundResponse,
+        playersResponse,
+        gamesResponse,
+        wolfResponse,
+        skinsResponse,
+        pokerResponse
+      ] = await Promise.all([
+        supabase
+          .from('rounds')
+          .select('*')
+          .eq('id', activeRound.id)
+          .single(),
+        supabase
+          .from('players')
+          .select('*')
+          .eq('round_id', activeRound.id)
+          .order('player_order'),
+        supabase
+          .from('round_games')
+          .select('*')
+          .eq('round_id', activeRound.id),
+        supabase
+          .from('wolf_results')
+          .select('*')
+          .eq('round_id', activeRound.id)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('skins_results')
+          .select('*')
+          .eq('round_id', activeRound.id)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('poker_results')
+          .select('*')
+          .eq('round_id', activeRound.id)
+          .order('created_at', { ascending: true })
+      ])
+
+      const firstError = [
+        roundResponse.error,
+        playersResponse.error,
+        gamesResponse.error,
+        wolfResponse.error,
+        skinsResponse.error,
+        pokerResponse.error
+      ].find(Boolean)
+
+      if (firstError) throw firstError
+
+      const refreshedRound = {
+        ...roundResponse.data,
+        players: playersResponse.data || [],
+        games: gamesResponse.data || []
+      }
+
+      const sequence = buildHoleSequence(
+        refreshedRound.starting_hole
+      )
+
+      let holeIndex = sequence.findIndex(
+        hole =>
+          Number(hole) ===
+          Number(refreshedRound.current_hole)
+      )
+
+      if (holeIndex < 0) holeIndex = 0
+      if (refreshedRound.status === 'completed') {
+        holeIndex = 18
+      }
+
+      const holeChanged =
+        Number(refreshedRound.current_hole) !==
+          Number(activeRound.current_hole) ||
+        refreshedRound.status !== activeRound.status
+
+      setActiveRound({
+        ...refreshedRound,
+        holeSequence: sequence,
+        holeIndex
+      })
+
+      setWolfResults(wolfResponse.data || [])
+      setSkinsResults(skinsResponse.data || [])
+      setPokerResults(pokerResponse.data || [])
+
+      if (
+        holeChanged &&
+        refreshedRound.status !== 'completed'
+      ) {
+        const scheduledWolf = getScheduledWolf(
+          refreshedRound,
+          holeIndex,
+          wolfResponse.data || []
+        )
+
+        setWolfPlayerId(scheduledWolf?.id || '')
+        setPartnerPlayerId('')
+        setWolfResult('win')
+        setScoreType('normal')
+        setSkinsWinnerId('')
+        setPokerSelections(
+          makePokerSelections(refreshedRound.players)
+        )
+      }
+    } catch (err) {
+      console.error('Host refresh failed:', err)
+      setError(
+        err.message ||
+          'Could not refresh the round.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function refreshLiveViewer() {
+    if (!joinedRound || loading) return
+    await openLiveViewer(joinedRound)
+  }
+
+  useEffect(() => {
+    if (screen !== 'live-viewer' || !joinedRound?.id) return
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshLiveViewer()
+      }
+    }
+
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+
+    return () => {
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [screen, joinedRound?.id])
 
   if (recoveringHost) {
     return (
@@ -2692,9 +3001,20 @@ function formatMoney(value) {
             </h1>
           </div>
 
-          <div className="live-badge">
-            <span className="live-dot"></span>
-            LIVE
+          <div className="viewer-live-actions">
+            <div className="live-badge">
+              <span className="live-dot"></span>
+              LIVE
+            </div>
+
+            <button
+              type="button"
+              className="secondary-button viewer-refresh-button"
+              onClick={refreshLiveViewer}
+              disabled={loading}
+            >
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
           </div>
         </div>
 
@@ -2818,7 +3138,7 @@ function formatMoney(value) {
                   viewerPokerHands[player.id] || []
 
                 const bestHand =
-                  getBestPokerHand(cards)
+                  getBestDisplayPokerHand(cards)
 
                 return (
                   <div
@@ -2899,7 +3219,7 @@ function formatMoney(value) {
             {isComplete &&
               viewerPokerOutcome?.status === 'no-winner' && (
                 <div className="error-message">
-                  No player has five Poker cards, so there is no automatic Poker winner.
+                  No player has any Poker cards, so there is no automatic Poker winner.
                 </div>
               )}
           </>
@@ -3170,6 +3490,15 @@ function formatMoney(value) {
             <div className="hole-progress">
               {Math.min(activeRound.holeIndex + 1, 18)} / 18
             </div>
+
+            <button
+              type="button"
+              className="secondary-button viewer-refresh-button"
+              onClick={refreshHostRound}
+              disabled={loading}
+            >
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </button>
 
             <button
               type="button"
@@ -3605,7 +3934,7 @@ function formatMoney(value) {
                   pokerHands[player.id] || []
 
                 const bestHand =
-                  getBestPokerHand(cards)
+                  getBestDisplayPokerHand(cards)
 
                 return (
                   <div
@@ -3774,7 +4103,7 @@ function formatMoney(value) {
             {hasPoker &&
               pokerOutcome?.status === 'no-winner' && (
                 <div className="error-message">
-                  No player has five Poker cards, so there is no automatic Poker winner.
+                  No player has any Poker cards, so there is no automatic Poker winner.
                 </div>
               )}
           </>

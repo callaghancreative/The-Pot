@@ -947,3 +947,26 @@ select option {
     padding-bottom: 24px;
   }
 }
+
+/* THE POT — live viewer refresh controls */
+
+.viewer-live-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.viewer-refresh-button {
+  width: auto;
+  min-height: 40px;
+  padding: 8px 14px;
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .viewer-refresh-button {
+    font-size: 0.85rem;
+    padding: 7px 12px;
+  }
+}
