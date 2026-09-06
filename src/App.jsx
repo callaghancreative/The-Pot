@@ -828,7 +828,7 @@ async function ensureAnonymousUser() {
 
   if (signInError) throw signInError
   if (!data?.user) {
-    throw new Error('Could not create a guest session.')
+    throw new Error('Could not start your session.')
   }
 
   return data.user
@@ -839,6 +839,7 @@ function App() {
 
   const [playerCount, setPlayerCount] = useState(4)
   const [players, setPlayers] = useState(['', '', '', ''])
+  const [playerProfileIds, setPlayerProfileIds] = useState([null, null, null, null])
   const [startingHole, setStartingHole] = useState(1)
 
   const [wolfEnabled, setWolfEnabled] = useState(true)
@@ -866,6 +867,23 @@ function App() {
   const [createdRound, setCreatedRound] = useState(null)
   const [error, setError] = useState('')
 
+  const [authUser, setAuthUser] = useState(null)
+  const [userProfile, setUserProfile] = useState(null)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [profileName, setProfileName] = useState('')
+  const [savedGolfers, setSavedGolfers] = useState([])
+  const [newGolferName, setNewGolferName] = useState('')
+  const [newGolferCode, setNewGolferCode] = useState('')
+  const [golfersLoading, setGolfersLoading] = useState(false)
+  const [savedGroups, setSavedGroups] = useState([])
+  const [newGroupName, setNewGroupName] = useState('')
+  const [newGroupSelections, setNewGroupSelections] = useState([])
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [roundHistory, setRoundHistory] = useState([])
+  const [seasonStandings, setSeasonStandings] = useState([])
+  const [seasonLoading, setSeasonLoading] = useState(false)
+  const [seasonYear, setSeasonYear] = useState(new Date().getFullYear())
+
   const [activeRound, setActiveRound] = useState(null)
   const [wolfResults, setWolfResults] = useState([])
 
@@ -882,6 +900,686 @@ function App() {
   const [pokerResults, setPokerResults] = useState([])
   const [pokerSelections, setPokerSelections] = useState({})
   const [viewerPokerResults, setViewerPokerResults] = useState([])
+
+  function getSeasonPointScale(playerCount) {
+    if (playerCount === 4) return [100, 70, 50, 30]
+    if (playerCount === 3) return [100, 65, 40]
+    return [100, 50]
+  }
+
+  function buildSeasonRows(round, wolfRows, skinsRows, pokerRows) {
+    const combined = calculateCombinedPositions(round, wolfRows, skinsRows, pokerRows)
+    const sorted = [...round.players]
+      .map(player => ({
+        player,
+        total: Math.round(Number(combined[player.id]?.total || 0) * 100) / 100
+      }))
+      .sort((a, b) => b.total - a.total)
+
+    const pointScale = getSeasonPointScale(round.players.length)
+    const completedAt = new Date().toISOString()
+    const currentYear = new Date().getFullYear()
+    const rows = []
+
+    let index = 0
+    while (index < sorted.length) {
+      let end = index
+      while (
+        end + 1 < sorted.length &&
+        Math.abs(sorted[end + 1].total - sorted[index].total) < 0.005
+      ) {
+        end += 1
+      }
+
+      const tied = end > index
+      const points = pointScale.slice(index, end + 1)
+      const averagedPoints = points.length
+        ? points.reduce((sum, value) => sum + value, 0) / points.length
+        : 0
+
+      for (let positionIndex = index; positionIndex <= end; positionIndex += 1) {
+        const entry = sorted[positionIndex]
+        if (!entry.player.profile_id) continue
+
+        rows.push({
+          round_id: round.id,
+          profile_id: entry.player.profile_id,
+          season_year: currentYear,
+          final_position: index + 1,
+          is_tie: tied,
+          pot_total: entry.total,
+          season_points: Math.round(averagedPoints * 100) / 100,
+          player_count: round.players.length,
+          completed_at: completedAt,
+          updated_at: completedAt
+        })
+      }
+
+      index = end + 1
+    }
+
+    return rows
+  }
+
+  async function recordSeasonResults(round, wolfRows, skinsRows, pokerRows) {
+    const rows = buildSeasonRows(round, wolfRows, skinsRows, pokerRows)
+    if (!rows.length) return
+
+    const { error: seasonError } = await supabase
+      .from('season_results')
+      .upsert(rows, { onConflict: 'round_id,profile_id' })
+
+    if (seasonError) throw seasonError
+  }
+
+  async function loadSeasonData(profileId, year = new Date().getFullYear()) {
+    if (!profileId) {
+      setRoundHistory([])
+      setSeasonStandings([])
+      return
+    }
+
+    setSeasonLoading(true)
+    setError('')
+
+    try {
+      const { data, error: seasonError } = await supabase
+        .from('season_results')
+        .select(`
+          round_id,
+          profile_id,
+          season_year,
+          final_position,
+          is_tie,
+          pot_total,
+          season_points,
+          player_count,
+          completed_at,
+          profiles ( display_name, golfer_code ),
+          rounds ( round_code )
+        `)
+        .eq('season_year', year)
+        .order('completed_at', { ascending: false })
+
+      if (seasonError) throw seasonError
+
+      const rows = data || []
+      setRoundHistory(rows.filter(row => row.profile_id === profileId))
+
+      const byProfile = new Map()
+      rows.forEach(row => {
+        const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles
+        const name = profile?.display_name || 'THE POT golfer'
+        const existing = byProfile.get(row.profile_id) || {
+          profile_id: row.profile_id,
+          display_name: name,
+          rounds: 0,
+          wins: 0,
+          points: 0,
+          netPot: 0
+        }
+
+        existing.rounds += 1
+        if (Number(row.final_position) === 1) existing.wins += 1
+        existing.points += Number(row.season_points || 0)
+        existing.netPot += Number(row.pot_total || 0)
+        byProfile.set(row.profile_id, existing)
+      })
+
+      const standings = [...byProfile.values()]
+        .map(item => ({
+          ...item,
+          points: Math.round(item.points * 100) / 100,
+          netPot: Math.round(item.netPot * 100) / 100
+        }))
+        .sort((a, b) =>
+          b.points - a.points ||
+          b.netPot - a.netPot ||
+          a.display_name.localeCompare(b.display_name)
+        )
+
+      setSeasonStandings(standings)
+      setSeasonYear(year)
+    } catch (seasonError) {
+      console.error(seasonError)
+      setError(seasonError.message || 'Could not load season data.')
+    } finally {
+      setSeasonLoading(false)
+    }
+  }
+
+  async function openSeasonScreen(target) {
+    if (!userProfile?.id) return
+    await loadSeasonData(userProfile.id, new Date().getFullYear())
+    setScreen(target)
+  }
+
+  function formatHistoryDate(value) {
+    if (!value) return ''
+    return new Intl.DateTimeFormat('en-AU', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    }).format(new Date(value))
+  }
+
+  function formatMoney(value) {
+    const amount = Number(value || 0)
+    const sign = amount > 0 ? '+' : amount < 0 ? '-' : ''
+    return `${sign}$${Math.abs(amount).toFixed(2)}`
+  }
+
+  async function loadSavedGolfers(userId) {
+    if (!userId) {
+      setSavedGolfers([])
+      return []
+    }
+
+    const { data, error: golfersError } = await supabase
+      .from('saved_golfers')
+      .select('id, display_name, linked_profile_id, created_at')
+      .eq('owner_user_id', userId)
+      .order('display_name', { ascending: true })
+
+    if (golfersError) throw golfersError
+
+    setSavedGolfers(data || [])
+    return data || []
+  }
+
+  async function addSavedGolfer() {
+    const displayName = newGolferName.trim()
+
+    if (!displayName) {
+      setError('Enter your playing partner\'s name.')
+      return
+    }
+
+    if (!authUser?.id) {
+      setError('Create your profile before saving playing partners.')
+      return
+    }
+
+    if (savedGolfers.some(golfer => golfer.display_name.toLowerCase() === displayName.toLowerCase())) {
+      setError(`${displayName} is already in My Golfers.`)
+      return
+    }
+
+    setGolfersLoading(true)
+    setError('')
+
+    try {
+      const { data, error: golferError } = await supabase
+        .from('saved_golfers')
+        .insert({
+          owner_user_id: authUser.id,
+          display_name: displayName
+        })
+        .select('id, display_name, linked_profile_id, created_at')
+        .single()
+
+      if (golferError) throw golferError
+
+      setSavedGolfers(current =>
+        [...current, data].sort((a, b) => a.display_name.localeCompare(b.display_name))
+      )
+      setNewGolferName('')
+    } catch (golferError) {
+      console.error(golferError)
+      setError(golferError.message || 'Could not save this golfer.')
+    } finally {
+      setGolfersLoading(false)
+    }
+  }
+
+  async function linkSavedGolferByCode() {
+    const code = newGolferCode.trim().toUpperCase().replace(/\s+/g, '')
+
+    if (!code) {
+      setError('Enter their THE POT golfer code.')
+      return
+    }
+
+    if (!authUser?.id) {
+      setError('Create your profile before linking playing partners.')
+      return
+    }
+
+    setGolfersLoading(true)
+    setError('')
+
+    try {
+      const { data: linkedProfile, error: lookupError } = await supabase
+        .from('profiles')
+        .select('id, display_name, golfer_code')
+        .eq('golfer_code', code)
+        .maybeSingle()
+
+      if (lookupError) throw lookupError
+      if (!linkedProfile) {
+        setError('No THE POT golfer was found with that code.')
+        return
+      }
+      if (linkedProfile.id === authUser.id) {
+        setError('That is your own golfer code.')
+        return
+      }
+      if (savedGolfers.some(golfer => golfer.linked_profile_id === linkedProfile.id)) {
+        setError(`${linkedProfile.display_name} is already linked in My Golfers.`)
+        return
+      }
+
+      const { data, error: golferError } = await supabase
+        .from('saved_golfers')
+        .insert({
+          owner_user_id: authUser.id,
+          display_name: linkedProfile.display_name,
+          linked_profile_id: linkedProfile.id
+        })
+        .select('id, display_name, linked_profile_id, created_at')
+        .single()
+
+      if (golferError) throw golferError
+
+      setSavedGolfers(current =>
+        [...current, data].sort((a, b) => a.display_name.localeCompare(b.display_name))
+      )
+      setNewGolferCode('')
+    } catch (golferError) {
+      console.error(golferError)
+      setError(golferError.message || 'Could not link this golfer.')
+    } finally {
+      setGolfersLoading(false)
+    }
+  }
+
+  async function removeSavedGolfer(golfer) {
+    if (!window.confirm(`Remove ${golfer.display_name} from My Golfers?`)) return
+
+    setGolfersLoading(true)
+    setError('')
+
+    try {
+      const { error: golferError } = await supabase
+        .from('saved_golfers')
+        .delete()
+        .eq('id', golfer.id)
+
+      if (golferError) throw golferError
+
+      setSavedGolfers(current => current.filter(item => item.id !== golfer.id))
+    } catch (golferError) {
+      console.error(golferError)
+      setError(golferError.message || 'Could not remove this golfer.')
+    } finally {
+      setGolfersLoading(false)
+    }
+  }
+
+  async function loadSavedGroups(userId) {
+    if (!userId) {
+      setSavedGroups([])
+      return []
+    }
+
+    const { data, error: groupsError } = await supabase
+      .from('saved_groups')
+      .select(`
+        id,
+        name,
+        created_at,
+        saved_group_members (
+          id,
+          display_name,
+          profile_id,
+          member_order
+        )
+      `)
+      .eq('owner_user_id', userId)
+      .order('name', { ascending: true })
+
+    if (groupsError) throw groupsError
+
+    const groups = (data || []).map(group => ({
+      ...group,
+      members: [...(group.saved_group_members || [])].sort(
+        (a, b) => Number(a.member_order) - Number(b.member_order)
+      )
+    }))
+
+    setSavedGroups(groups)
+    return groups
+  }
+
+  function getGroupChoices() {
+    const choices = []
+
+    if (userProfile) {
+      choices.push({
+        key: `profile:${userProfile.id}`,
+        display_name: userProfile.display_name,
+        profile_id: userProfile.id,
+        label: 'You'
+      })
+    }
+
+    savedGolfers.forEach(golfer => {
+      choices.push({
+        key: golfer.linked_profile_id
+          ? `profile:${golfer.linked_profile_id}`
+          : `guest:${golfer.id}`,
+        display_name: golfer.display_name,
+        profile_id: golfer.linked_profile_id || null,
+        label: golfer.linked_profile_id ? 'Linked' : 'Guest'
+      })
+    })
+
+    return choices
+  }
+
+  function toggleNewGroupMember(choiceKey) {
+    setNewGroupSelections(current => {
+      if (current.includes(choiceKey)) {
+        return current.filter(key => key !== choiceKey)
+      }
+
+      if (current.length >= 4) {
+        setError('A saved group can have a maximum of 4 golfers.')
+        return current
+      }
+
+      setError('')
+      return [...current, choiceKey]
+    })
+  }
+
+  async function createSavedGroup() {
+    const groupName = newGroupName.trim()
+    const choices = getGroupChoices()
+    const selected = newGroupSelections
+      .map(key => choices.find(choice => choice.key === key))
+      .filter(Boolean)
+
+    if (!groupName) {
+      setError('Give this group a name.')
+      return
+    }
+
+    if (!authUser?.id) {
+      setError('Create your profile before saving a group.')
+      return
+    }
+
+    if (selected.length < 2 || selected.length > 4) {
+      setError('Choose between 2 and 4 golfers for this group.')
+      return
+    }
+
+    if (savedGroups.some(group => group.name.toLowerCase() === groupName.toLowerCase())) {
+      setError(`You already have a saved group called ${groupName}.`)
+      return
+    }
+
+    setGroupsLoading(true)
+    setError('')
+
+    let createdGroup = null
+
+    try {
+      const { data: group, error: groupError } = await supabase
+        .from('saved_groups')
+        .insert({
+          owner_user_id: authUser.id,
+          name: groupName
+        })
+        .select('id, name, created_at')
+        .single()
+
+      if (groupError) throw groupError
+      createdGroup = group
+
+      const members = selected.map((choice, index) => ({
+        group_id: group.id,
+        display_name: choice.display_name,
+        profile_id: choice.profile_id,
+        member_order: index + 1
+      }))
+
+      const { error: membersError } = await supabase
+        .from('saved_group_members')
+        .insert(members)
+
+      if (membersError) throw membersError
+
+      await loadSavedGroups(authUser.id)
+      setNewGroupName('')
+      setNewGroupSelections([])
+    } catch (groupError) {
+      console.error(groupError)
+
+      if (createdGroup?.id) {
+        await supabase
+          .from('saved_groups')
+          .delete()
+          .eq('id', createdGroup.id)
+      }
+
+      setError(groupError.message || 'Could not save this group.')
+    } finally {
+      setGroupsLoading(false)
+    }
+  }
+
+  async function removeSavedGroup(group) {
+    if (!window.confirm(`Remove ${group.name} from Saved Groups?`)) return
+
+    setGroupsLoading(true)
+    setError('')
+
+    try {
+      const { error: groupError } = await supabase
+        .from('saved_groups')
+        .delete()
+        .eq('id', group.id)
+
+      if (groupError) throw groupError
+
+      setSavedGroups(current => current.filter(item => item.id !== group.id))
+    } catch (groupError) {
+      console.error(groupError)
+      setError(groupError.message || 'Could not remove this group.')
+    } finally {
+      setGroupsLoading(false)
+    }
+  }
+
+  function loadSavedGroup(group, openRound = false) {
+    const members = [...(group.members || [])]
+      .sort((a, b) => Number(a.member_order) - Number(b.member_order))
+      .slice(0, 4)
+
+    if (members.length < 2) {
+      setError('This saved group does not have enough golfers.')
+      return
+    }
+
+    const nextNames = Array(4).fill('')
+    const nextIds = Array(4).fill(null)
+
+    members.forEach((member, index) => {
+      nextNames[index] = member.display_name
+      nextIds[index] = member.profile_id || null
+    })
+
+    setPlayerCount(members.length)
+    setPlayers(nextNames)
+    setPlayerProfileIds(nextIds)
+    setError('')
+
+    if (openRound) setScreen('create')
+  }
+
+  function toggleRoundGolfer(golfer) {
+    const cleanName = golfer.display_name.trim()
+    if (!cleanName) return
+
+    const profileId = golfer.profile_id || golfer.linked_profile_id || null
+    const active = players.slice(0, playerCount)
+    const activeIds = playerProfileIds.slice(0, playerCount)
+    const existingIndex = profileId
+      ? activeIds.findIndex(id => id === profileId)
+      : active.findIndex(player => player.trim().toLowerCase() === cleanName.toLowerCase())
+
+    if (existingIndex >= 0) {
+      const remainingNames = active.filter((_, index) => index !== existingIndex)
+      const remainingIds = activeIds.filter((_, index) => index !== existingIndex)
+      const nextNames = [...remainingNames, ...Array(playerCount - remainingNames.length).fill(''), ...players.slice(playerCount)]
+      const nextIds = [...remainingIds, ...Array(playerCount - remainingIds.length).fill(null), ...playerProfileIds.slice(playerCount)]
+      setPlayers(nextNames.slice(0, 4))
+      setPlayerProfileIds(nextIds.slice(0, 4))
+      setError('')
+      return
+    }
+
+    const emptyIndex = active.findIndex(player => !player.trim())
+    if (emptyIndex < 0) {
+      setError(`All ${playerCount} player spots are filled.`)
+      return
+    }
+
+    const nextNames = [...players]
+    const nextIds = [...playerProfileIds]
+    nextNames[emptyIndex] = cleanName
+    nextIds[emptyIndex] = profileId
+    setPlayers(nextNames)
+    setPlayerProfileIds(nextIds)
+    setError('')
+  }
+
+  function openCreateRound() {
+    setError('')
+
+    if (userProfile?.display_name && !players.slice(0, playerCount).some(name => name.trim())) {
+      const next = [...players]
+      next[0] = userProfile.display_name
+      setPlayers(next)
+      const nextIds = [...playerProfileIds]
+      nextIds[0] = userProfile.id
+      setPlayerProfileIds(nextIds)
+    }
+
+    setScreen('create')
+  }
+
+  async function loadSignedInProfile(user) {
+    if (!user) {
+      setAuthUser(null)
+      setUserProfile(null)
+      return null
+    }
+
+    setAuthUser(user)
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, display_name, golfer_code, created_at, updated_at')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (profileError) throw profileError
+
+    setUserProfile(profile || null)
+    if (profile?.display_name) {
+      setProfileName(profile.display_name)
+      await Promise.all([
+        loadSavedGolfers(user.id),
+        loadSavedGroups(user.id)
+      ])
+    } else {
+      setSavedGolfers([])
+      setSavedGroups([])
+    }
+
+    return profile || null
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function initialiseAccount() {
+      try {
+        const { data, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError) throw sessionError
+        if (cancelled) return
+        await loadSignedInProfile(data.session?.user || null)
+      } catch (accountError) {
+        console.error('Could not restore THE POT profile:', accountError)
+      }
+    }
+
+    initialiseAccount()
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (cancelled) return
+
+        window.setTimeout(() => {
+          loadSignedInProfile(session?.user || null).catch(accountError => {
+            console.error('Could not refresh THE POT profile:', accountError)
+          })
+        }, 0)
+      }
+    )
+
+    return () => {
+      cancelled = true
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  async function saveProfile() {
+    const displayName = profileName.trim()
+
+    if (!displayName) {
+      setError('Enter the name you want your playing partners to see.')
+      return
+    }
+
+    setAuthLoading(true)
+    setError('')
+
+    try {
+      const profileUser = authUser || await ensureAnonymousUser()
+      setAuthUser(profileUser)
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .upsert(
+          {
+            id: profileUser.id,
+            display_name: displayName,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'id' }
+        )
+        .select('id, display_name, golfer_code, created_at, updated_at')
+        .single()
+
+      if (profileError) throw profileError
+
+      setUserProfile(profile)
+      await Promise.all([
+        loadSavedGolfers(profileUser.id),
+        loadSavedGroups(profileUser.id)
+      ])
+      setScreen('profile')
+    } catch (profileError) {
+      console.error(profileError)
+      setError(profileError.message || 'Could not save your profile.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -1227,6 +1925,10 @@ function App() {
     const next = [...players]
     next[index] = value
     setPlayers(next)
+
+    const nextIds = [...playerProfileIds]
+    nextIds[index] = null
+    setPlayerProfileIds(nextIds)
   }
 
   function updatePokerSelection(playerId, field) {
@@ -1557,6 +2259,23 @@ function App() {
       activeRound.holeIndex + 1
 
     if (nextIndex >= 18) {
+      const finalWolfResults = newWolfResult
+        ? [...wolfResults, newWolfResult]
+        : wolfResults
+      const finalSkinsResults = newSkinsResult
+        ? [...skinsResults, newSkinsResult]
+        : skinsResults
+      const finalPokerResults = newPokerResults.length
+        ? [...pokerResults, ...newPokerResults]
+        : pokerResults
+
+      await recordSeasonResults(
+        activeRound,
+        finalWolfResults,
+        finalSkinsResults,
+        finalPokerResults
+      )
+
       const { error: roundUpdateError } =
         await supabase
           .from('rounds')
@@ -2272,6 +2991,7 @@ function formatMoney(value) {
     const activePlayers = players
       .slice(0, playerCount)
       .map(name => name.trim())
+    const activeProfileIds = playerProfileIds.slice(0, playerCount)
 
     if (activePlayers.some(name => !name)) {
       setError('Please enter a name for every player.')
@@ -2318,7 +3038,8 @@ function formatMoney(value) {
       const playerRows = activePlayers.map((name, index) => ({
         round_id: round.id,
         name,
-        player_order: index + 1
+        player_order: index + 1,
+        profile_id: activeProfileIds[index] || null
       }))
 
       const { data: insertedPlayers, error: playersError } = await supabase
@@ -2753,7 +3474,7 @@ function formatMoney(value) {
             <p className="eyebrow">THE POT</p>
             <h2>Restoring your round...</h2>
             <p className="success-copy">
-              Checking for an active host session on this device.
+              Picking up where you left off.
             </p>
           </div>
         </section>
@@ -2788,10 +3509,7 @@ function formatMoney(value) {
             <div className="actions">
               <button
                 className="primary-button"
-                onClick={() => {
-                  setError('')
-                  setScreen('create')
-                }}
+                onClick={openCreateRound}
               >
                 Create Round
               </button>
@@ -2805,7 +3523,464 @@ function formatMoney(value) {
               >
                 Join Round
               </button>
+
+              <button
+                className="account-link-button"
+                onClick={() => {
+                  setError('')
+                  setScreen(userProfile ? 'profile' : 'profile-setup')
+                }}
+              >
+                {userProfile ? `My Profile · ${userProfile.display_name}` : 'Create My Profile'}
+              </button>
             </div>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'profile-setup') {
+    return (
+      <main className="app-shell">
+        <section className="create-shell account-shell">
+          <button
+            className="back-button"
+            onClick={() => {
+              setError('')
+              setScreen('home')
+            }}
+          >
+            ← Back
+          </button>
+
+          <img
+            src="/brand/the-pot-logo.png"
+            alt="THE POT"
+            className="brand-logo small-logo"
+          />
+
+          <div className="create-header">
+            <p className="eyebrow">MY PROFILE</p>
+            <h1>Make it official.</h1>
+            <p className="intro">
+              Add your name and you’re in. No login required.
+            </p>
+          </div>
+
+          <div className="form-card account-card">
+            <label>
+              Display name
+              <input
+                type="text"
+                autoComplete="name"
+                placeholder="Ben"
+                value={profileName}
+                onChange={e => setProfileName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') saveProfile()
+                }}
+              />
+            </label>
+
+            <p className="profile-device-note">
+              Your profile stays on this device for now.
+            </p>
+
+            {error && <div className="error-message">{error}</div>}
+
+            <button
+              type="button"
+              className="primary-button"
+              onClick={saveProfile}
+              disabled={authLoading}
+            >
+              {authLoading ? 'Saving...' : 'Create Profile'}
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'profile') {
+    return (
+      <main className="app-shell">
+        <section className="create-shell account-shell">
+          <button
+            className="back-button"
+            onClick={() => {
+              setError('')
+              setScreen('home')
+            }}
+          >
+            ← Back
+          </button>
+
+          <img
+            src="/brand/the-pot-logo.png"
+            alt="THE POT"
+            className="brand-logo small-logo"
+          />
+
+          <div className="create-header">
+            <p className="eyebrow">MY PROFILE</p>
+            <h1>{userProfile?.display_name || 'THE POT golfer'}</h1>
+            <p className="intro">
+              Your rounds, your regulars and your place on the table.
+            </p>
+          </div>
+
+          <div className="form-card account-card profile-summary-card">
+            <div className="profile-summary-row">
+              <span>Name</span>
+              <strong>{userProfile?.display_name}</strong>
+            </div>
+            <div className="profile-summary-row">
+              <span>This device</span>
+              <strong>Profile saved</strong>
+            </div>
+            <div className="profile-summary-row golfer-code-row">
+              <span>Golfer code</span>
+              <strong>{userProfile?.golfer_code || '—'}</strong>
+            </div>
+            <p className="golfer-code-help">
+              Share your code with the group once. After that, your rounds and results follow you no matter who keeps score.
+            </p>
+
+            <div className="my-golfers-section">
+              <div className="my-golfers-heading">
+                <div>
+                  <p className="eyebrow">MY GOLFERS</p>
+                  <h2>The usual crew</h2>
+                </div>
+                <span>{savedGolfers.length}</span>
+              </div>
+
+              {savedGolfers.length > 0 ? (
+                <div className="saved-golfers-list">
+                  {savedGolfers.map(golfer => (
+                    <div key={golfer.id} className="saved-golfer-row">
+                      <div className="saved-golfer-identity">
+                        <strong>{golfer.display_name}</strong>
+                        <span className={golfer.linked_profile_id ? 'golfer-status linked' : 'golfer-status guest'}>
+                          {golfer.linked_profile_id ? 'Linked' : 'Guest'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="golfer-remove-button"
+                        onClick={() => removeSavedGolfer(golfer)}
+                        disabled={golfersLoading}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="my-golfers-empty">
+                  Add the golfers you play with most. They’ll be ready to go next Saturday.
+                </p>
+              )}
+
+              <div className="golfer-link-card">
+                <div className="golfer-link-copy">
+                  <strong>Link a THE POT golfer</strong>
+                  <span>Got their golfer code? Link them once and their results stay with them.</span>
+                </div>
+                <div className="add-golfer-row">
+                  <input
+                    type="text"
+                    placeholder="Golfer code"
+                    value={newGolferCode}
+                    onChange={e => setNewGolferCode(e.target.value.toUpperCase())}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') linkSavedGolferByCode()
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary-button add-golfer-button"
+                    onClick={linkSavedGolferByCode}
+                    disabled={golfersLoading}
+                  >
+                    {golfersLoading ? 'Linking...' : 'Link'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="golfer-guest-card">
+                <div className="golfer-link-copy">
+                  <strong>Add a guest</strong>
+                  <span>No code? No problem. Add their name and get on with the round.</span>
+                </div>
+                <div className="add-golfer-row">
+                  <input
+                    type="text"
+                    placeholder="Guest golfer name"
+                    value={newGolferName}
+                    onChange={e => setNewGolferName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') addSavedGolfer()
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary-button add-golfer-button"
+                    onClick={addSavedGolfer}
+                    disabled={golfersLoading}
+                  >
+                    {golfersLoading ? 'Saving...' : '+ Guest'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="saved-groups-section">
+              <div className="my-golfers-heading">
+                <div>
+                  <p className="eyebrow">SAVED GROUPS</p>
+                  <h2>Your regular groups</h2>
+                </div>
+                <span>{savedGroups.length}</span>
+              </div>
+
+              {savedGroups.length > 0 ? (
+                <div className="saved-groups-list">
+                  {savedGroups.map(group => (
+                    <div key={group.id} className="saved-group-card">
+                      <div className="saved-group-topline">
+                        <div>
+                          <strong>{group.name}</strong>
+                          <span>
+                            {(group.members || []).map(member => member.display_name).join(' · ')}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="golfer-remove-button"
+                          onClick={() => removeSavedGroup(group)}
+                          disabled={groupsLoading}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="primary-button group-use-button"
+                        onClick={() => loadSavedGroup(group, true)}
+                      >
+                        Start Round
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="my-golfers-empty">
+                  Save the usual lineup and load everyone in one tap.
+                </p>
+              )}
+
+              <div className="group-builder-card">
+                <div className="golfer-link-copy">
+                  <strong>Create a saved group</strong>
+                  <span>Pick 2–4 golfers and give the group a name.</span>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Group name — e.g. Saturday Crew"
+                  value={newGroupName}
+                  onChange={e => setNewGroupName(e.target.value)}
+                />
+
+                <div className="group-member-picker">
+                  {getGroupChoices().map(choice => {
+                    const selected = newGroupSelections.includes(choice.key)
+
+                    return (
+                      <button
+                        key={choice.key}
+                        type="button"
+                        className={selected ? 'group-member-chip selected' : 'group-member-chip'}
+                        onClick={() => toggleNewGroupMember(choice.key)}
+                      >
+                        {choice.display_name} · {choice.label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  className="primary-button group-save-button"
+                  onClick={createSavedGroup}
+                  disabled={groupsLoading}
+                >
+                  {groupsLoading ? 'Saving...' : 'Save Group'}
+                </button>
+              </div>
+            </div>
+
+            <div className="profile-season-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => openSeasonScreen('history')}
+                disabled={seasonLoading}
+              >
+                {seasonLoading ? 'Loading...' : 'Round History'}
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => openSeasonScreen('standings')}
+                disabled={seasonLoading}
+              >
+                {seasonYear} Standings
+              </button>
+            </div>
+
+            {error && <div className="error-message">{error}</div>}
+
+            <button
+              type="button"
+              className="primary-button"
+              onClick={openCreateRound}
+            >
+              Start a Round
+            </button>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => setScreen('home')}
+            >
+              Done
+            </button>
+
+            <button
+              type="button"
+              className="account-link-button"
+              onClick={() => {
+                setError('')
+                setProfileName(userProfile?.display_name || '')
+                setScreen('profile-setup')
+              }}
+            >
+              Edit Name
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'history') {
+    const totalPoints = roundHistory.reduce((sum, row) => sum + Number(row.season_points || 0), 0)
+    const totalPot = roundHistory.reduce((sum, row) => sum + Number(row.pot_total || 0), 0)
+    const wins = roundHistory.filter(row => Number(row.final_position) === 1).length
+
+    return (
+      <main className="app-shell">
+        <section className="create-shell account-shell">
+          <button className="back-button" onClick={() => setScreen('profile')}>← Back</button>
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="create-header">
+            <p className="eyebrow">ROUND HISTORY</p>
+            <h1>{seasonYear} rounds.</h1>
+            <p className="intro">Every completed round. Every win, loss and dollar.</p>
+          </div>
+
+          <div className="form-card season-screen-card">
+            <div className="season-summary-strip">
+              <div className="season-summary-stat"><span>Rounds</span><strong>{roundHistory.length}</strong></div>
+              <div className="season-summary-stat"><span>Points</span><strong>{totalPoints.toFixed(totalPoints % 1 ? 1 : 0)}</strong></div>
+              <div className="season-summary-stat"><span>Net Pot</span><strong>{formatMoney(totalPot)}</strong></div>
+            </div>
+
+            {roundHistory.length > 0 ? (
+              <div className="history-list">
+                {roundHistory.map(row => {
+                  const roundInfo = Array.isArray(row.rounds) ? row.rounds[0] : row.rounds
+                  return (
+                    <div key={`${row.round_id}:${row.profile_id}`} className="history-row">
+                      <div className="history-main">
+                        <strong>Round {roundInfo?.round_code || '—'}</strong>
+                        <span>{formatHistoryDate(row.completed_at)} · {row.player_count} players · {row.is_tie ? 'T' : ''}{row.final_position}{row.final_position === 1 ? 'st' : row.final_position === 2 ? 'nd' : row.final_position === 3 ? 'rd' : 'th'}</span>
+                      </div>
+                      <div className="history-result">
+                        <strong>{formatMoney(row.pot_total)}</strong>
+                        <span>+{Number(row.season_points || 0).toFixed(Number(row.season_points || 0) % 1 ? 1 : 0)} pts</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <p className="season-empty">Nothing on the card yet. Finish a round and it’ll show up here.</p>
+            )}
+
+            <button type="button" className="secondary-button" onClick={() => openSeasonScreen('standings')}>View {seasonYear} Standings</button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'standings') {
+    const myStandingIndex = seasonStandings.findIndex(row => row.profile_id === userProfile?.id)
+    const myStanding = myStandingIndex >= 0 ? seasonStandings[myStandingIndex] : null
+
+    return (
+      <main className="app-shell">
+        <section className="create-shell account-shell">
+          <button className="back-button" onClick={() => setScreen('profile')}>← Back</button>
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="create-header">
+            <p className="eyebrow">THE POT SEASON</p>
+            <h1>{seasonYear} Standings.</h1>
+            <p className="intro">Every round counts. Stack points across the season and see who finishes on top.</p>
+          </div>
+
+          <div className="form-card season-screen-card">
+            {myStanding && (
+              <div className="season-summary-strip">
+                <div className="season-summary-stat"><span>Your Rank</span><strong>#{myStandingIndex + 1}</strong></div>
+                <div className="season-summary-stat"><span>Points</span><strong>{myStanding.points.toFixed(myStanding.points % 1 ? 1 : 0)}</strong></div>
+                <div className="season-summary-stat"><span>Wins</span><strong>{myStanding.wins}</strong></div>
+              </div>
+            )}
+
+            {seasonStandings.length > 0 ? (
+              <>
+                <div className="standings-header">
+                  <span>#</span><span>Golfer</span><span>Rnds</span><span>Pts</span><span className="standings-net-column">Net Pot</span>
+                </div>
+                <div className="standings-list">
+                  {seasonStandings.map((row, index) => (
+                    <div key={row.profile_id} className="standings-row">
+                      <div className="standings-rank">{index + 1}</div>
+                      <div className="standings-golfer">
+                        <strong>{row.display_name}{row.profile_id === userProfile?.id ? ' · You' : ''}</strong>
+                        <span>{row.wins} {row.wins === 1 ? 'win' : 'wins'}</span>
+                      </div>
+                      <div className="standings-number">{row.rounds}</div>
+                      <div className="standings-number standings-points">{row.points.toFixed(row.points % 1 ? 1 : 0)}</div>
+                      <div className="standings-number standings-net-column">{formatMoney(row.netPot)}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <p className="season-empty">The table’s empty. Finish the first round and set the benchmark.</p>
+            )}
+
+            <p className="season-rules-note">How points work: 4 players — 100 / 70 / 50 / 30; 3 players — 100 / 65 / 40; 2 players — 100 / 50. Tied positions split the points for those places evenly.</p>
+            <button type="button" className="secondary-button" onClick={() => openSeasonScreen('history')}>View My Round History</button>
           </div>
         </section>
       </main>
@@ -2888,7 +4063,7 @@ function formatMoney(value) {
             </h1>
 
             <p className="success-copy">
-              You’re in. This is currently the viewer version of the round.
+              You’re in. Follow the round live as the scores come in.
             </p>
 
             <div className="player-list">
@@ -3239,18 +4414,18 @@ function formatMoney(value) {
             {isComplete &&
               viewerPokerOutcome?.status === 'tie' && (
                 <div className="error-message">
-                  Poker finished in an exact tie between{' '}
+                  Poker is tied between{' '}
                   {viewerPokerOutcome.winners
                     .map(item => item.player.name)
                     .join(' and ')}.
-                  Settle the Poker pot manually.
+                  Settle the pot manually.
                 </div>
               )}
 
             {isComplete &&
               viewerPokerOutcome?.status === 'no-winner' && (
                 <div className="error-message">
-                  No player has any Poker cards, so there is no automatic Poker winner.
+                  No cards dealt this round, so there’s no Poker winner.
                 </div>
               )}
           </>
@@ -3348,7 +4523,7 @@ function formatMoney(value) {
         )}
 
         <p className="viewer-note">
-          View only · Scores update automatically
+          Live view · Scores update automatically
         </p>
 
       </section>
@@ -3374,7 +4549,7 @@ function formatMoney(value) {
             </h1>
 
             <p className="success-copy">
-              Share this code with the group to join the round.
+              Send the code to the group, then get the first hole underway.
             </p>
 
             <div className="player-list">
@@ -4123,18 +5298,18 @@ function formatMoney(value) {
             {hasPoker &&
               pokerOutcome?.status === 'tie' && (
                 <div className="error-message">
-                  Poker finished in an exact tie between{' '}
+                  Poker is tied between{' '}
                   {pokerOutcome.winners
                     .map(item => item.player.name)
                     .join(' and ')}.
-                  Settle the Poker pot manually.
+                  Settle the pot manually.
                 </div>
               )}
 
             {hasPoker &&
               pokerOutcome?.status === 'no-winner' && (
                 <div className="error-message">
-                  No player has any Poker cards, so there is no automatic Poker winner.
+                  No cards dealt this round, so there’s no Poker winner.
                 </div>
               )}
           </>
@@ -4199,6 +5374,55 @@ function formatMoney(value) {
                 </button>
               ))}
             </div>
+
+            {userProfile && savedGroups.length > 0 && (
+              <div className="quick-groups">
+                <div className="quick-golfers-label">Saved groups</div>
+                <div className="quick-groups-grid">
+                  {savedGroups.map(group => (
+                    <button
+                      key={group.id}
+                      type="button"
+                      className="saved-group-chip"
+                      onClick={() => loadSavedGroup(group)}
+                    >
+                      <strong>{group.name}</strong>
+                      <span>{(group.members || []).map(member => member.display_name).join(' · ')}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {userProfile && (
+              <div className="quick-golfers">
+                <div className="quick-golfers-label">Quick select</div>
+                <div className="quick-golfers-chips">
+                  {[
+                    { id: 'self', display_name: userProfile.display_name, profile_id: userProfile.id, isSelf: true },
+                    ...savedGolfers
+                  ].map(golfer => {
+                    const golferProfileId = golfer.profile_id || golfer.linked_profile_id || null
+                    const selected = golferProfileId
+                      ? playerProfileIds.slice(0, playerCount).some(id => id === golferProfileId)
+                      : players.slice(0, playerCount).some(
+                          name => name.trim().toLowerCase() === golfer.display_name.toLowerCase()
+                        )
+
+                    return (
+                      <button
+                        key={golfer.id}
+                        type="button"
+                        className={selected ? 'golfer-chip selected' : 'golfer-chip'}
+                        onClick={() => toggleRoundGolfer(golfer)}
+                      >
+                        {golfer.display_name}{golfer.isSelf ? ' · You' : golfer.linked_profile_id ? ' · Linked' : ' · Guest'}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="player-inputs">
               {players.slice(0, playerCount).map((player, index) => (

@@ -970,3 +970,1025 @@ select option {
     padding: 7px 12px;
   }
 }
+
+/* THE POT — Profiles Stage 1 */
+
+.account-shell {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-card input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.account-link-button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #F6F0E4;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.account-link-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.otp-input {
+  text-align: center;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+}
+
+.account-message {
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 169, 0, 0.35);
+  border-radius: 14px;
+  background: rgba(245, 169, 0, 0.08);
+  text-align: center;
+}
+
+.profile-summary-card {
+  gap: 14px;
+}
+
+.profile-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(246, 240, 228, 0.12);
+}
+
+.profile-summary-row span {
+  opacity: 0.7;
+}
+
+.profile-summary-row strong {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.danger-link {
+  opacity: 0.75;
+}
+
+@media (max-width: 600px) {
+  .account-shell {
+    width: 100%;
+  }
+
+  .profile-summary-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .profile-summary-row strong {
+    text-align: left;
+  }
+}
+
+/* THE POT — simple beta profiles */
+
+.account-shell {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.account-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-card input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.account-link-button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #F6F0E4;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.account-link-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.profile-device-note {
+  margin: -4px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  text-align: center;
+  opacity: 0.68;
+}
+
+.profile-summary-card {
+  gap: 14px;
+}
+
+.profile-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(246, 240, 228, 0.12);
+}
+
+.profile-summary-row span {
+  opacity: 0.7;
+}
+
+.profile-summary-row strong {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .account-shell {
+    width: 100%;
+  }
+
+  .profile-summary-row {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .profile-summary-row strong {
+    text-align: left;
+  }
+}
+
+/* THE POT — Golfer ID + linking */
+
+.golfer-code-row strong {
+  letter-spacing: 0.08em;
+}
+
+.golfer-code-help {
+  margin: 8px 0 20px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  opacity: 0.72;
+}
+
+.saved-golfer-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.golfer-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  opacity: 0.8;
+}
+
+.golfer-status.linked {
+  opacity: 1;
+}
+
+.golfer-status.guest {
+  opacity: 0.55;
+}
+
+.golfer-link-card,
+.golfer-guest-card {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(16, 42, 35, 0.12);
+}
+
+.golfer-link-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.golfer-link-copy span {
+  font-size: 0.84rem;
+  line-height: 1.4;
+  opacity: 0.68;
+}
+
+@media (max-width: 560px) {
+  .saved-golfer-identity {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+}
+
+/* THE POT — Saved Groups */
+.saved-groups-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(16, 42, 35, 0.14);
+}
+
+.saved-groups-list,
+.quick-groups-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.saved-group-card,
+.group-builder-card,
+.saved-group-chip {
+  border: 1px solid rgba(16, 42, 35, 0.14);
+  border-radius: 16px;
+  background: rgba(246, 240, 228, 0.62);
+}
+
+.saved-group-card,
+.group-builder-card {
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.saved-group-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.saved-group-topline > div {
+  min-width: 0;
+}
+
+.saved-group-topline strong,
+.saved-group-chip strong {
+  display: block;
+  color: #102A23;
+}
+
+.saved-group-topline span,
+.saved-group-chip span {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  opacity: 0.72;
+}
+
+.group-use-button,
+.group-save-button {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.group-member-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.group-member-chip {
+  border: 1px solid rgba(16, 42, 35, 0.18);
+  border-radius: 999px;
+  padding: 9px 12px;
+  background: transparent;
+  color: #102A23;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.group-member-chip.selected {
+  border-color: #F5A900;
+  background: #F5A900;
+  color: #102A23;
+  font-weight: 700;
+}
+
+.quick-groups {
+  margin-top: 14px;
+}
+
+.saved-group-chip {
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  color: #102A23;
+  font: inherit;
+  cursor: pointer;
+}
+
+.saved-group-chip:hover {
+  border-color: rgba(245, 169, 0, 0.8);
+}
+
+/* =========================================
+   THE POT — Saved Groups / Quick Add
+   Warm Cream Brand Update
+   ========================================= */
+
+.saved-groups-panel,
+.saved-group-card,
+.quick-add-panel,
+.quick-select-panel {
+  background: #F6F0E4;
+  color: #102A23;
+}
+
+/* Headings and text inside the cream panels */
+.saved-groups-panel h1,
+.saved-groups-panel h2,
+.saved-groups-panel h3,
+.saved-group-card h1,
+.saved-group-card h2,
+.saved-group-card h3,
+.quick-add-panel h1,
+.quick-add-panel h2,
+.quick-add-panel h3,
+.quick-select-panel h1,
+.quick-select-panel h2,
+.quick-select-panel h3 {
+  color: #102A23;
+}
+
+/* Supporting text */
+.saved-groups-panel p,
+.saved-group-card p,
+.quick-add-panel p,
+.quick-select-panel p {
+  color: #102A23;
+}
+
+/* Keep THE POT gold for highlighted / selected states */
+.saved-groups-panel .selected,
+.saved-group-card.selected,
+.quick-add-panel .selected,
+.quick-select-panel .selected {
+  border-color: #F5A900;
+}
+
+/* Inputs inside cream sections */
+.saved-groups-panel input,
+.quick-add-panel input,
+.quick-select-panel input {
+  background: #ffffff;
+  color: #102A23;
+  border-color: rgba(16, 42, 35, 0.25);
+}
+
+/* =========================================
+   THE POT — Round History + Season Standings
+   ========================================= */
+
+.profile-season-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 20px 0 4px;
+}
+
+.season-screen-card {
+  display: grid;
+  gap: 14px;
+}
+
+.season-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.season-summary-stat {
+  border: 1px solid rgba(16, 42, 35, 0.16);
+  border-radius: 14px;
+  padding: 12px 8px;
+  text-align: center;
+  background: #F6F0E4;
+  color: #102A23;
+}
+
+.season-summary-stat span {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  opacity: 0.72;
+}
+
+.season-summary-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.15rem;
+}
+
+.history-list,
+.standings-list {
+  display: grid;
+  gap: 9px;
+}
+
+.history-row,
+.standings-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(16, 42, 35, 0.13);
+  border-radius: 14px;
+  padding: 12px;
+  background: #F6F0E4;
+  color: #102A23;
+}
+
+.history-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.history-main strong,
+.standings-golfer strong {
+  display: block;
+}
+
+.history-main span,
+.standings-golfer span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  opacity: 0.68;
+}
+
+.history-result {
+  text-align: right;
+}
+
+.history-result strong {
+  display: block;
+  color: #102A23;
+}
+
+.history-result span {
+  display: block;
+  margin-top: 2px;
+  color: #6C8A74;
+  font-size: 0.78rem;
+}
+
+.standings-header,
+.standings-row {
+  grid-template-columns: 34px minmax(110px, 1fr) 52px 64px 70px;
+}
+
+.standings-header {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px;
+  color: rgba(246, 240, 228, 0.68);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.standings-rank {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.standings-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.standings-points {
+  color: #102A23;
+  font-weight: 800;
+}
+
+.season-empty {
+  margin: 0;
+  padding: 18px;
+  border-radius: 14px;
+  background: #F6F0E4;
+  color: #102A23;
+  text-align: center;
+}
+
+.season-rules-note {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  opacity: 0.72;
+}
+
+@media (max-width: 540px) {
+  .standings-header,
+  .standings-row {
+    grid-template-columns: 28px minmax(90px, 1fr) 44px 58px;
+  }
+
+  .standings-net-column {
+    display: none;
+  }
+
+  .profile-season-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   THE POT — Mobile Button System Audit
+   Paste at the VERY BOTTOM of App.css
+   Brand hierarchy:
+   Primary   = Honey Gold fill / Deep Forest text
+   Secondary = Honey Gold outline / Honey Gold text
+   Tertiary  = Light Sage text-link treatment
+   ========================================================= */
+
+:root {
+  --pot-gold: #F5A900;
+  --pot-forest: #102A23;
+  --pot-cream: #F6F0E4;
+  --pot-sage: #6C8A74;
+  --pot-sage-light: #A9C2AF;
+}
+
+/* ---------- Core action buttons ---------- */
+.primary-button,
+.secondary-button {
+  width: 100%;
+  min-height: 48px;
+  padding: 13px 18px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease, background-color 120ms ease;
+  box-sizing: border-box;
+  margin-top: 12px;
+  margin-bottom: 12px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.primary-button {
+  background: var(--pot-gold) !important;
+  color: var(--pot-forest) !important;
+  border: 2px solid var(--pot-gold) !important;
+}
+
+.secondary-button {
+  background: transparent !important;
+  color: var(--pot-gold) !important;
+  border: 2px solid var(--pot-gold) !important;
+}
+
+.primary-button:active,
+.secondary-button:active {
+  transform: translateY(1px);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Tertiary actions / links ---------- */
+.back-button,
+.account-link-button,
+.golfer-remove-button {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: auto;
+  min-height: 44px;
+  padding: 8px 2px;
+  margin-top: 8px;
+  margin-bottom: 14px;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--pot-sage-light) !important;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.back-button:hover,
+.account-link-button:hover,
+.golfer-remove-button:hover {
+  color: var(--pot-cream) !important;
+}
+
+/* Remove sits inside compact rows, but still gets breathing room */
+.saved-golfer-row .golfer-remove-button,
+.saved-group-topline .golfer-remove-button {
+  margin: 4px 0;
+  min-height: 40px;
+  flex: 0 0 auto;
+}
+
+/* ---------- Selection / toggle buttons ----------
+   These are controls rather than CTAs, but visually follow the
+   secondary hierarchy until selected. */
+.choice-button,
+.segment,
+.golfer-chip,
+.saved-group-chip,
+.group-member-chip {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--pot-gold) !important;
+  background: transparent !important;
+  color: var(--pot-gold) !important;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.choice-button.active,
+.segment.active,
+.golfer-chip.selected,
+.group-member-chip.selected,
+.saved-group-chip.selected {
+  background: var(--pot-gold) !important;
+  color: var(--pot-forest) !important;
+  border-color: var(--pot-gold) !important;
+}
+
+.saved-group-chip {
+  text-align: left;
+}
+
+.saved-group-chip strong,
+.saved-group-chip span {
+  color: inherit !important;
+}
+
+/* ---------- Consistent button-group spacing ---------- */
+.actions,
+.viewer-actions,
+.active-round-actions,
+.profile-season-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+  margin-bottom: 18px;
+}
+
+/* A lone action should use the full row. */
+.actions > :only-child,
+.viewer-actions > :only-child,
+.active-round-actions > :only-child,
+.profile-season-actions > :only-child {
+  grid-column: 1 / -1;
+}
+
+.actions > .primary-button,
+.actions > .secondary-button,
+.viewer-actions > .primary-button,
+.viewer-actions > .secondary-button,
+.active-round-actions > .primary-button,
+.active-round-actions > .secondary-button,
+.profile-season-actions > .primary-button,
+.profile-season-actions > .secondary-button {
+  margin: 0;
+}
+
+/* Any CTA placed at the bottom of a card/section gets separation */
+.form-card > .primary-button,
+.form-card > .secondary-button,
+.success-card > .primary-button,
+.success-card > .secondary-button,
+.game-scoring-block > .primary-button,
+.game-scoring-block > .secondary-button {
+  margin-top: 18px;
+  margin-bottom: 10px;
+}
+
+.form-section + .primary-button,
+.form-section + .secondary-button,
+.error-message + .primary-button,
+.error-message + .secondary-button {
+  margin-top: 18px;
+}
+
+/* ---------- My Golfers: link / guest actions ---------- */
+.golfer-link-card,
+.golfer-guest-card,
+.group-builder-card {
+  padding-bottom: 16px;
+}
+
+.add-golfer-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+
+.add-golfer-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.add-golfer-row .add-golfer-button {
+  width: auto;
+  min-width: 92px;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+/* ---------- Saved Groups ---------- */
+.saved-group-card {
+  padding-bottom: 16px;
+}
+
+.saved-group-card .group-use-button {
+  margin-top: 16px;
+  margin-bottom: 0;
+}
+
+.group-builder-card > input {
+  margin-top: 14px;
+}
+
+.group-member-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  margin-bottom: 16px;
+}
+
+.group-save-button {
+  margin-top: 16px !important;
+  margin-bottom: 4px !important;
+}
+
+/* ---------- Create Round quick adds ---------- */
+.quick-groups,
+.quick-golfers {
+  margin-top: 18px;
+  margin-bottom: 18px;
+}
+
+.quick-groups-grid,
+.quick-golfers-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.quick-groups-grid .saved-group-chip,
+.quick-golfers-chips .golfer-chip {
+  margin: 0;
+}
+
+/* ---------- Scoring controls ---------- */
+.segmented,
+.choice-grid,
+.partner-grid,
+.result-grid,
+.poker-choice-grid,
+.skin-choice-grid {
+  gap: 10px;
+}
+
+/* Preserve separation between a scoring-control block and the next section */
+.segmented,
+.choice-grid,
+.partner-grid,
+.result-grid {
+  margin-bottom: 10px;
+}
+
+/* ---------- Mobile-specific audit ---------- */
+@media (max-width: 640px) {
+  .primary-button,
+  .secondary-button {
+    min-height: 50px;
+    padding: 14px 16px;
+    border-radius: 999px;
+  }
+
+  /* Keep paired actions side-by-side when they are short and related. */
+  .actions,
+  .viewer-actions,
+  .active-round-actions,
+  .profile-season-actions {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .actions .primary-button,
+  .actions .secondary-button,
+  .viewer-actions .primary-button,
+  .viewer-actions .secondary-button,
+  .active-round-actions .primary-button,
+  .active-round-actions .secondary-button,
+  .profile-season-actions .primary-button,
+  .profile-season-actions .secondary-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Input + action rows stack cleanly on narrow phones */
+  .add-golfer-row {
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 14px;
+    margin-bottom: 12px;
+  }
+
+  .add-golfer-row .add-golfer-button {
+    width: 100%;
+    margin: 0;
+  }
+
+  /* Quick-add controls need enough touch area and separation */
+  .quick-groups-grid,
+  .quick-golfers-chips,
+  .group-member-picker {
+    gap: 10px;
+  }
+
+  .golfer-chip,
+  .group-member-chip {
+    min-height: 44px;
+    padding: 10px 13px;
+  }
+
+  .saved-group-chip {
+    width: 100%;
+    min-height: 52px;
+    padding: 12px 14px;
+  }
+
+  /* Do not let a final CTA visually attach itself to preceding content */
+  .form-card > button:last-child,
+  .success-card > button:last-child,
+  .game-scoring-block > button:last-child {
+    margin-bottom: 10px;
+  }
+
+  .back-button {
+    margin-top: 2px;
+    margin-bottom: 18px;
+  }
+}
+
+
+/* ---------- Pill layout refinements ---------- */
+/* Compact paired buttons can share a row. Long/critical actions still span full width. */
+.create-button,
+.group-save-button,
+.group-use-button {
+  border-radius: 999px !important;
+}
+
+/* Inputs + their short action button may sit side by side when there is room. */
+.add-golfer-row .add-golfer-button {
+  border-radius: 999px !important;
+}
+
+/* Very narrow phones: stack paired actions to avoid cramped labels. */
+@media (max-width: 390px) {
+  .actions,
+  .viewer-actions,
+  .active-round-actions,
+  .profile-season-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .actions > *,
+  .viewer-actions > *,
+  .active-round-actions > *,
+  .profile-season-actions > * {
+    grid-column: 1;
+  }
+}
+/* =========================================
+   SAVED GROUP BUILDER — CREAM PANEL POLISH
+   ========================================= */
+
+/* Main cream group-builder panel */
+.group-builder-card {
+  background: #F6F0E4;
+  color: #102A23;
+}
+
+/* All headings + supporting copy */
+.group-builder-card h1,
+.group-builder-card h2,
+.group-builder-card h3,
+.group-builder-card h4,
+.group-builder-card p,
+.group-builder-card label,
+.group-builder-card .eyebrow,
+.group-builder-card .viewer-note {
+  color: #102A23;
+}
+
+/* Group name input */
+.group-builder-card input {
+  background: #FFFFFF;
+  color: #102A23;
+  border: 1px solid rgba(16, 42, 35, 0.3);
+}
+
+.group-builder-card input::placeholder {
+  color: rgba(16, 42, 35, 0.55);
+}
+
+/* Player selection pills — unselected */
+.group-builder-card .choice-button,
+.group-builder-card .quick-select-chip,
+.group-builder-card .golfer-chip,
+.group-builder-card .group-member-chip {
+  background: transparent;
+  color: #102A23;
+  border: 1.5px solid #102A23;
+  border-radius: 999px;
+}
+
+/* Selected golfer */
+.group-builder-card .choice-button.active,
+.group-builder-card .quick-select-chip.active,
+.group-builder-card .golfer-chip.active,
+.group-builder-card .group-member-chip.active,
+.group-builder-card .selected {
+  background: #F5A900;
+  color: #102A23;
+  border-color: #F5A900;
+}
+
+/* Slight interaction feedback */
+.group-builder-card .choice-button:hover,
+.group-builder-card .quick-select-chip:hover,
+.group-builder-card .golfer-chip:hover,
+.group-builder-card .group-member-chip:hover {
+  background: rgba(16, 42, 35, 0.06);
+}
+
+/* Keep selected state gold on hover */
+.group-builder-card .choice-button.active:hover,
+.group-builder-card .quick-select-chip.active:hover,
+.group-builder-card .golfer-chip.active:hover,
+.group-builder-card .group-member-chip.active:hover {
+  background: #F5A900;
+}
