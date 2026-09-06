@@ -971,7 +971,7 @@ select option {
   }
 }
 
-/* THE POT — Profiles Stage 1 */
+/* THE POT — Profile */
 
 .account-shell {
   max-width: 560px;
@@ -1068,47 +1068,7 @@ select option {
   }
 }
 
-/* THE POT — simple beta profiles */
-
-.account-shell {
-  max-width: 560px;
-  margin: 0 auto;
-}
-
-.account-card {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.account-card label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.account-card input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.account-link-button {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: #F6F0E4;
-  font: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  cursor: pointer;
-  padding: 10px 12px;
-}
-
-.account-link-button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
+/* THE POT — profile device note */
 
 .profile-device-note {
   margin: -4px 0 0;
@@ -1116,42 +1076,6 @@ select option {
   line-height: 1.45;
   text-align: center;
   opacity: 0.68;
-}
-
-.profile-summary-card {
-  gap: 14px;
-}
-
-.profile-summary-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(246, 240, 228, 0.12);
-}
-
-.profile-summary-row span {
-  opacity: 0.7;
-}
-
-.profile-summary-row strong {
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 600px) {
-  .account-shell {
-    width: 100%;
-  }
-
-  .profile-summary-row {
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .profile-summary-row strong {
-    text-align: left;
-  }
 }
 
 /* THE POT — Golfer ID + linking */
@@ -1536,8 +1460,7 @@ select option {
 }
 
 /* =========================================================
-   THE POT — Mobile Button System Audit
-   Paste at the VERY BOTTOM of App.css
+   THE POT — Button System
    Brand hierarchy:
    Primary   = Honey Gold fill / Deep Forest text
    Secondary = Honey Gold outline / Honey Gold text
@@ -1992,3 +1915,56 @@ button:disabled {
 .group-builder-card .group-member-chip.active:hover {
   background: #F5A900;
 }
+
+/* =========================================================
+   THE POT — Mobile Layout & Edge Spacing
+   Authoritative mobile overrides
+   ========================================================= */
+
+@media (max-width: 650px) {
+  /* Consistent safe space from the left/right screen edges on every view. */
+  .create-shell,
+  .account-shell,
+  .home-shell {
+    width: 100%;
+    max-width: 760px;
+    padding-left: 20px;
+    padding-right: 20px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* Home: primary actions share the first row; profile sits underneath. */
+  .home-shell .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+  }
+
+  .home-shell .actions > .primary-button,
+  .home-shell .actions > .secondary-button {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .home-shell .actions .account-link-button {
+    grid-column: 1 / -1;
+    justify-self: center;
+    width: auto;
+    margin: 6px 0 0;
+  }
+}
+
+@media (max-width: 390px) {
+  /* On very narrow phones, preserve readability over forcing a two-up row. */
+  .home-shell .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .home-shell .actions > * {
+    grid-column: 1;
+  }
+}
+
