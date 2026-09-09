@@ -5,6 +5,17 @@ import '@fontsource/inter/600.css'
 import '@fontsource/bricolage-grotesque/700.css'
 import { supabase } from './lib/supabase'
 
+function makeEventCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let code = ''
+
+  for (let i = 0; i < 5; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)]
+  }
+
+  return code
+}
+
 function makeRoundCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   let code = ''
@@ -884,6 +895,50 @@ function App() {
   const [seasonLoading, setSeasonLoading] = useState(false)
   const [seasonYear, setSeasonYear] = useState(new Date().getFullYear())
 
+
+  // Tournament / Event Stage 1
+  const [eventName, setEventName] = useState('')
+  const [eventScoringBasis, setEventScoringBasis] = useState('nett')
+  const [eventEntryPlayerCount, setEventEntryPlayerCount] = useState(4)
+  const [eventEntryPlayerNames, setEventEntryPlayerNames] = useState(Array(4).fill(''))
+  const [eventEntryProfileIds, setEventEntryProfileIds] = useState(Array(4).fill(null))
+  const [createdEvent, setCreatedEvent] = useState(null)
+  const [joinedEvent, setJoinedEvent] = useState(null)
+  const [joinedEventGroup, setJoinedEventGroup] = useState(null)
+  const [eventJoinCode, setEventJoinCode] = useState('')
+  const [eventLoading, setEventLoading] = useState(false)
+
+  // Tournament / Event Stage 2 — hole scoring + live leaderboard
+  const [eventCurrentHole, setEventCurrentHole] = useState(1)
+  const [eventHolePar, setEventHolePar] = useState(4)
+  const [eventHoleScores, setEventHoleScores] = useState({})
+  const [eventScoreLoading, setEventScoreLoading] = useState(false)
+
+  // Tournament / Event Stage 3 — group side games
+  const [eventWolfEnabled, setEventWolfEnabled] = useState(false)
+  const [eventSkinsEnabled, setEventSkinsEnabled] = useState(false)
+  const [eventPokerEnabled, setEventPokerEnabled] = useState(false)
+
+  const [eventWolfDollarPoint, setEventWolfDollarPoint] = useState(1)
+  const [eventBirdieMultiplier, setEventBirdieMultiplier] = useState(2)
+  const [eventEagleMultiplier, setEventEagleMultiplier] = useState(3)
+
+  const [eventSkinsMode, setEventSkinsMode] = useState('individual')
+  const [eventSkinsTeamPairing, setEventSkinsTeamPairing] = useState('12v34')
+  const [eventSkinsDollar, setEventSkinsDollar] = useState(5)
+  const [eventSkinsCarryovers, setEventSkinsCarryovers] = useState(true)
+
+  const [eventPokerFineValue, setEventPokerFineValue] = useState(2)
+  const [eventPokerBuyIn, setEventPokerBuyIn] = useState(10)
+
+  const [eventSideRound, setEventSideRound] = useState(null)
+  const [eventWolfResults, setEventWolfResults] = useState([])
+  const [eventSkinsResults, setEventSkinsResults] = useState([])
+  const [eventPokerResults, setEventPokerResults] = useState([])
+  const [eventWolfPlayerId, setEventWolfPlayerId] = useState('')
+  const [eventWolfPartnerId, setEventWolfPartnerId] = useState('')
+  const [eventPokerSelections, setEventPokerSelections] = useState({})
+
   const [activeRound, setActiveRound] = useState(null)
   const [wolfResults, setWolfResults] = useState([])
 
@@ -1456,6 +1511,1328 @@ function App() {
     setError('')
   }
 
+  function resetEventGroupEntry() {
+    setEventEntryPlayerCount(4)
+    setEventEntryPlayerNames(Array(4).fill(''))
+    setEventEntryProfileIds(Array(4).fill(null))
+
+    setEventWolfEnabled(false)
+    setEventSkinsEnabled(false)
+    setEventPokerEnabled(false)
+
+    setEventWolfDollarPoint(1)
+    setEventBirdieMultiplier(2)
+    setEventEagleMultiplier(3)
+
+    setEventSkinsMode('individual')
+    setEventSkinsTeamPairing('12v34')
+    setEventSkinsDollar(5)
+    setEventSkinsCarryovers(true)
+
+    setEventPokerFineValue(2)
+    setEventPokerBuyIn(10)
+  }
+
+  function updateEventEntryPlayer(index, value) {
+    setEventEntryPlayerNames(current => {
+      const next = [...current]
+      next[index] = value
+      return next
+    })
+    setEventEntryProfileIds(current => {
+      const next = [...current]
+      next[index] = null
+      return next
+    })
+  }
+
+  function loadSavedGroupIntoEvent(group) {
+    const members = [...(group.members || [])].slice(0, 4)
+    if (members.length < 2) {
+      setError('That saved group does not have enough golfers.')
+      return
+    }
+
+    setEventEntryPlayerCount(members.length)
+    setEventEntryPlayerNames([
+      ...members.map(member => member.display_name),
+      ...Array(4 - members.length).fill('')
+    ])
+    setEventEntryProfileIds([
+      ...members.map(member => member.profile_id || null),
+      ...Array(4 - members.length).fill(null)
+    ])
+    setError('')
+  }
+
+  async function generateUniqueEventCode() {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const code = makeEventCode()
+
+      const { data, error: codeError } = await supabase
+        .from('events')
+        .select('id')
+        .eq('event_code', code)
+        .maybeSingle()
+
+      if (codeError) throw codeError
+      if (!data) return code
+    }
+
+    throw new Error('Could not generate a unique event code.')
+  }
+
+  async function fetchEventByCode(code) {
+    const { data: event, error: eventError } = await supabase
+      .from('events')
+      .select('*')
+      .eq('event_code', code)
+      .maybeSingle()
+
+    if (eventError) throw eventError
+    if (!event) return null
+
+    const { data: groups, error: groupsError } = await supabase
+      .from('event_groups')
+      .select('*')
+      .eq('event_id', event.id)
+      .order('group_number')
+
+    if (groupsError) throw groupsError
+
+    const { data: eventPlayers, error: playersError } = await supabase
+      .from('event_players')
+      .select('*')
+      .eq('event_id', event.id)
+      .order('player_order')
+
+    if (playersError) throw playersError
+
+    const { data: eventHoles, error: holesError } = await supabase
+      .from('event_holes')
+      .select('*')
+      .eq('event_id', event.id)
+      .order('hole_number')
+
+    if (holesError) throw holesError
+
+    const { data: eventScores, error: scoresError } = await supabase
+      .from('event_hole_scores')
+      .select('*')
+      .eq('event_id', event.id)
+      .order('hole_number')
+
+    if (scoresError) throw scoresError
+
+    const hydratedGroups = (groups || []).map(group => ({
+      ...group,
+      players: (eventPlayers || [])
+        .filter(player => player.group_id === group.id)
+        .sort((a, b) => Number(a.player_order) - Number(b.player_order))
+    }))
+
+    return {
+      ...event,
+      groups: hydratedGroups,
+      holes: eventHoles || [],
+      scores: eventScores || []
+    }
+  }
+
+  async function refreshEvent(eventId, setter = setJoinedEvent) {
+    if (!eventId) return null
+
+    const { data: event, error: eventError } = await supabase
+      .from('events')
+      .select('*')
+      .eq('id', eventId)
+      .single()
+
+    if (eventError) throw eventError
+
+    const fullEvent = await fetchEventByCode(event.event_code)
+    setter(fullEvent)
+    return fullEvent
+  }
+
+  function getEventShareUrl(code) {
+    const url = new URL(window.location.origin)
+    url.searchParams.set('event', code)
+    return url.toString()
+  }
+
+  function syncEventUrl(code) {
+    if (!code) return
+
+    const url = new URL(window.location.href)
+    url.searchParams.delete('round')
+    url.searchParams.set('event', code)
+    window.history.replaceState({}, '', url)
+  }
+
+  function clearEventUrl() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('event')
+    window.history.replaceState({}, '', url)
+  }
+
+  async function shareEvent(code) {
+    const shareUrl = getEventShareUrl(code)
+    setShareStatus('')
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'THE POT',
+          text: `Follow the event live on THE POT · ${code}`,
+          url: shareUrl
+        })
+        return
+      }
+
+      await navigator.clipboard.writeText(shareUrl)
+      setShareStatus('Link copied')
+    } catch (err) {
+      if (err?.name === 'AbortError') return
+
+      try {
+        await navigator.clipboard.writeText(shareUrl)
+        setShareStatus('Link copied')
+      } catch (copyError) {
+        console.error(copyError)
+        setShareStatus(shareUrl)
+      }
+    }
+  }
+
+  function leaveEvent() {
+    clearEventUrl()
+    setJoinedEvent(null)
+    setJoinedEventGroup(null)
+    setCreatedEvent(null)
+    setEventSideRound(null)
+    setEventWolfResults([])
+    setEventSkinsResults([])
+    setEventPokerResults([])
+    setEventJoinCode('')
+    setError('')
+    setShareStatus('')
+    setScreen('home')
+  }
+
+  function openCreateEvent() {
+    clearEventUrl()
+    setError('')
+    setEventName('')
+    setEventScoringBasis('nett')
+    resetEventGroupEntry()
+    setScreen('create-event')
+  }
+
+  async function createEvent() {
+    setError('')
+
+    const cleanName = eventName.trim()
+    if (!cleanName) {
+      setError('Enter an event name.')
+      return
+    }
+
+    setEventLoading(true)
+    let insertedEventId = null
+
+    try {
+      const organiser = await ensureAnonymousUser()
+      const eventCode = await generateUniqueEventCode()
+
+      const { data: event, error: eventError } = await supabase
+        .from('events')
+        .insert({
+          event_code: eventCode,
+          name: cleanName,
+          scoring_basis: eventScoringBasis,
+          organiser_user_id: organiser.id,
+          status: 'setup'
+        })
+        .select()
+        .single()
+
+      if (eventError) throw eventError
+      insertedEventId = event.id
+
+      const fullEvent = { ...event, groups: [] }
+      setCreatedEvent(fullEvent)
+      setJoinedEvent(fullEvent)
+      syncEventUrl(fullEvent.event_code)
+      setScreen('event-created')
+    } catch (eventError) {
+      console.error(eventError)
+
+      if (insertedEventId) {
+        await supabase.from('events').delete().eq('id', insertedEventId)
+      }
+
+      setError(eventError.message || 'Could not create the event.')
+    } finally {
+      setEventLoading(false)
+    }
+  }
+
+  async function findEvent() {
+    setError('')
+    const code = eventJoinCode.trim().toUpperCase()
+
+    if (code.length !== 5) {
+      setError('Enter the 5-character event code.')
+      return
+    }
+
+    setEventLoading(true)
+    try {
+      const scorer = await ensureAnonymousUser()
+      const event = await fetchEventByCode(code)
+      if (!event) {
+        setError('Event not found. Check the code and try again.')
+        return
+      }
+
+      setJoinedEvent(event)
+      syncEventUrl(event.event_code)
+      const existingGroup = event.groups.find(group => group.scorer_user_id === scorer.id)
+      setJoinedEventGroup(existingGroup || null)
+      if (!existingGroup) resetEventGroupEntry()
+    } catch (eventError) {
+      console.error(eventError)
+      setError(eventError.message || 'Could not find the event.')
+    } finally {
+      setEventLoading(false)
+    }
+  }
+
+  async function fetchEventSideRound(roundId) {
+    if (!roundId) return null
+
+    const { data: round, error: roundError } = await supabase
+      .from('rounds')
+      .select('*')
+      .eq('id', roundId)
+      .single()
+
+    if (roundError) throw roundError
+
+    const { data: roundPlayers, error: playersError } = await supabase
+      .from('players')
+      .select('*')
+      .eq('round_id', roundId)
+      .order('player_order')
+
+    if (playersError) throw playersError
+
+    const { data: games, error: gamesError } = await supabase
+      .from('round_games')
+      .select('*')
+      .eq('round_id', roundId)
+
+    if (gamesError) throw gamesError
+
+    const [wolfResponse, skinsResponse, pokerResponse] = await Promise.all([
+      supabase.from('wolf_results').select('*').eq('round_id', roundId).order('hole'),
+      supabase.from('skins_results').select('*').eq('round_id', roundId).order('hole'),
+      supabase.from('poker_results').select('*').eq('round_id', roundId).order('hole')
+    ])
+
+    if (wolfResponse.error) throw wolfResponse.error
+    if (skinsResponse.error) throw skinsResponse.error
+    if (pokerResponse.error) throw pokerResponse.error
+
+    return {
+      ...round,
+      players: roundPlayers || [],
+      games: games || [],
+      wolfResults: wolfResponse.data || [],
+      skinsResults: skinsResponse.data || [],
+      pokerResults: pokerResponse.data || []
+    }
+  }
+
+  function buildEventGameRows(roundId) {
+    const rows = []
+
+    if (eventWolfEnabled) {
+      rows.push({
+        round_id: roundId,
+        game_type: 'wolf',
+        settings: {
+          dollarsPerPoint: Number(eventWolfDollarPoint),
+          birdieMultiplier: Number(eventBirdieMultiplier),
+          eagleMultiplier: Number(eventEagleMultiplier)
+        }
+      })
+    }
+
+    if (eventSkinsEnabled) {
+      rows.push({
+        round_id: roundId,
+        game_type: 'skins',
+        settings: {
+          mode: eventSkinsMode,
+          dollarsPerSkin: Number(eventSkinsDollar),
+          carryovers: eventSkinsCarryovers,
+          ...(eventSkinsMode === 'team'
+            ? {
+                teamOneOrders:
+                  eventSkinsTeamPairing === '12v34'
+                    ? [1, 2]
+                    : eventSkinsTeamPairing === '13v24'
+                      ? [1, 3]
+                      : [1, 4],
+                teamTwoOrders:
+                  eventSkinsTeamPairing === '12v34'
+                    ? [3, 4]
+                    : eventSkinsTeamPairing === '13v24'
+                      ? [2, 4]
+                      : [2, 3]
+              }
+            : {})
+        }
+      })
+    }
+
+    if (eventPokerEnabled) {
+      rows.push({
+        round_id: roundId,
+        game_type: 'poker',
+        settings: {
+          fineValue: Number(eventPokerFineValue),
+          buyIn: Number(eventPokerBuyIn)
+        }
+      })
+    }
+
+    return rows
+  }
+
+  function makeEventRoundPlayerNameMap(eventGroup, sideRound) {
+    const map = new Map()
+
+    ;(eventGroup?.players || []).forEach(eventPlayer => {
+      const roundPlayer = (sideRound?.players || []).find(
+        player =>
+          player.id === eventPlayer.round_player_id ||
+          Number(player.player_order) === Number(eventPlayer.player_order)
+      )
+
+      if (roundPlayer) map.set(eventPlayer.id, roundPlayer)
+    })
+
+    return map
+  }
+
+  async function enterEventGroup() {
+    if (!joinedEvent) return
+
+    setError('')
+    const cleanNames = eventEntryPlayerNames
+      .slice(0, eventEntryPlayerCount)
+      .map(name => name.trim())
+
+    if (cleanNames.length < 2 || cleanNames.some(name => !name)) {
+      setError('Enter each golfer in your group.')
+      return
+    }
+
+    if (eventWolfEnabled && eventEntryPlayerCount === 2) {
+      setError('Wolf requires 3 or 4 golfers.')
+      return
+    }
+
+    if (eventSkinsEnabled && eventSkinsMode === 'team' && eventEntryPlayerCount !== 4) {
+      setError('Team Skins requires exactly 4 golfers.')
+      return
+    }
+
+    setEventLoading(true)
+    let insertedGroupId = null
+    let insertedRoundId = null
+
+    try {
+      const scorer = await ensureAnonymousUser()
+      const freshEvent = await fetchEventByCode(joinedEvent.event_code)
+      if (!freshEvent) throw new Error('Event not found.')
+
+      const existingGroup = freshEvent.groups.find(group => group.scorer_user_id === scorer.id)
+      if (existingGroup) {
+        setJoinedEvent(freshEvent)
+        setJoinedEventGroup(existingGroup)
+        setScreen('event-lobby')
+        return
+      }
+
+      const roundCode = await generateUniqueRoundCode()
+
+      const { data: linkedRound, error: roundError } = await supabase
+        .from('rounds')
+        .insert({
+          round_code: roundCode,
+          starting_hole: 1,
+          current_hole: 1,
+          status: 'active',
+          host_user_id: scorer.id
+        })
+        .select()
+        .single()
+
+      if (roundError) throw roundError
+      insertedRoundId = linkedRound.id
+
+      const roundPlayerRows = cleanNames.map((name, index) => ({
+        round_id: linkedRound.id,
+        name,
+        player_order: index + 1,
+        profile_id: eventEntryProfileIds[index] || null
+      }))
+
+      const { data: linkedPlayers, error: linkedPlayersError } = await supabase
+        .from('players')
+        .insert(roundPlayerRows)
+        .select()
+
+      if (linkedPlayersError) throw linkedPlayersError
+
+      const gameRows = buildEventGameRows(linkedRound.id)
+
+      if (gameRows.length > 0) {
+        const { error: gamesError } = await supabase
+          .from('round_games')
+          .insert(gameRows)
+
+        if (gamesError) throw gamesError
+      }
+
+      const nextGroupNumber = freshEvent.groups.reduce(
+        (highest, group) => Math.max(highest, Number(group.group_number) || 0),
+        0
+      ) + 1
+
+      const { data: group, error: groupError } = await supabase
+        .from('event_groups')
+        .insert({
+          event_id: freshEvent.id,
+          group_number: nextGroupNumber,
+          scorer_user_id: scorer.id,
+          round_id: linkedRound.id,
+          status: 'ready'
+        })
+        .select()
+        .single()
+
+      if (groupError) throw groupError
+      insertedGroupId = group.id
+
+      const playerRows = cleanNames.map((displayName, playerIndex) => {
+        const linkedPlayer = (linkedPlayers || []).find(
+          player => Number(player.player_order) === playerIndex + 1
+        )
+
+        return {
+          event_id: freshEvent.id,
+          group_id: group.id,
+          display_name: displayName,
+          player_order: playerIndex + 1,
+          profile_id: eventEntryProfileIds[playerIndex] || null,
+          round_player_id: linkedPlayer?.id || null
+        }
+      })
+
+      const { error: playersError } = await supabase
+        .from('event_players')
+        .insert(playerRows)
+
+      if (playersError) throw playersError
+
+      const fullEvent = await refreshEvent(freshEvent.id)
+      const enteredGroup = fullEvent.groups.find(item => item.id === group.id)
+      setJoinedEventGroup(enteredGroup || group)
+      syncEventUrl(fullEvent.event_code)
+      setScreen('event-lobby')
+    } catch (eventError) {
+      console.error(eventError)
+
+      if (insertedGroupId) {
+        await supabase.from('event_groups').delete().eq('id', insertedGroupId)
+      }
+
+      if (insertedRoundId) {
+        await supabase.from('rounds').delete().eq('id', insertedRoundId)
+      }
+
+      setError(eventError.message || 'Could not enter your group in the event.')
+    } finally {
+      setEventLoading(false)
+    }
+  }
+
+  function openEventLobby(event = createdEvent || joinedEvent) {
+    if (!event) return
+    setJoinedEvent(event)
+    syncEventUrl(event.event_code)
+    setError('')
+    setScreen('event-lobby')
+  }
+
+  function getEventHolePar(event, holeNumber) {
+    return Number(
+      (event?.holes || []).find(hole => Number(hole.hole_number) === Number(holeNumber))?.par || 4
+    )
+  }
+
+  function getEventPlayerScore(event, playerId, holeNumber) {
+    const row = (event?.scores || []).find(
+      score =>
+        score.event_player_id === playerId &&
+        Number(score.hole_number) === Number(holeNumber)
+    )
+
+    return row ? Number(row.score) : ''
+  }
+
+  function buildEventLeaderboard(event) {
+    if (!event) return []
+
+    const parByHole = new Map(
+      (event.holes || []).map(hole => [Number(hole.hole_number), Number(hole.par)])
+    )
+
+    const players = (event.groups || []).flatMap(group =>
+      (group.players || []).map(player => ({
+        ...player,
+        group_number: Number(group.group_number)
+      }))
+    )
+
+    const rows = players.map(player => {
+      const playerScores = (event.scores || [])
+        .filter(score => score.event_player_id === player.id)
+        .sort((a, b) => Number(a.hole_number) - Number(b.hole_number))
+
+      let totalScore = 0
+      let totalPar = 0
+
+      playerScores.forEach(score => {
+        const holeNumber = Number(score.hole_number)
+        const par = parByHole.get(holeNumber) || 4
+        totalScore += Number(score.score)
+        totalPar += par
+      })
+
+      return {
+        ...player,
+        thru: playerScores.length,
+        totalScore,
+        totalPar,
+        toPar: totalScore - totalPar
+      }
+    })
+
+    rows.sort((a, b) => {
+      if (a.thru === 0 && b.thru > 0) return 1
+      if (b.thru === 0 && a.thru > 0) return -1
+      if (a.toPar !== b.toPar) return a.toPar - b.toPar
+      if (a.thru !== b.thru) return b.thru - a.thru
+      if (a.totalScore !== b.totalScore) return a.totalScore - b.totalScore
+      return a.display_name.localeCompare(b.display_name)
+    })
+
+    let previousScore = null
+    let previousPosition = 0
+
+    return rows.map((row, index) => {
+      const sameAsPrevious =
+        previousScore &&
+        row.thru === previousScore.thru &&
+        row.toPar === previousScore.toPar &&
+        row.totalScore === previousScore.totalScore
+
+      const position = sameAsPrevious ? previousPosition : index + 1
+      previousScore = row
+      previousPosition = position
+
+      return { ...row, position }
+    })
+  }
+
+  function formatEventToPar(value, thru) {
+    if (!thru) return '—'
+    if (value === 0) return 'E'
+    return value > 0 ? `+${value}` : `${value}`
+  }
+
+  function hydrateEventHoleForm(event, group, holeNumber, sideRound = eventSideRound) {
+    const safeHole = Math.min(18, Math.max(1, Number(holeNumber) || 1))
+    setEventCurrentHole(safeHole)
+    setEventHolePar(getEventHolePar(event, safeHole))
+
+    const nextScores = {}
+    ;(group?.players || []).forEach(player => {
+      const existing = getEventPlayerScore(event, player.id, safeHole)
+      nextScores[player.id] = existing === '' ? '' : String(existing)
+    })
+    setEventHoleScores(nextScores)
+
+    if (sideRound) {
+      const scheduledWolf = getScheduledWolf(
+        sideRound,
+        safeHole - 1,
+        sideRound.wolfResults || eventWolfResults
+      )
+
+      setEventWolfPlayerId(scheduledWolf?.id || '')
+      setEventWolfPartnerId('')
+      setEventPokerSelections(makePokerSelections(sideRound.players || []))
+    }
+  }
+
+  async function openEventScoring() {
+    if (!joinedEvent?.id || !joinedEventGroup?.id) return
+
+    setError('')
+    setEventScoreLoading(true)
+
+    try {
+      const fullEvent = await refreshEvent(joinedEvent.id)
+      const freshGroup = fullEvent.groups.find(group => group.id === joinedEventGroup.id)
+
+      if (!freshGroup) throw new Error('Your event group could not be found.')
+
+      setJoinedEventGroup(freshGroup)
+
+      let sideRound = null
+      if (freshGroup.round_id) {
+        sideRound = await fetchEventSideRound(freshGroup.round_id)
+        setEventSideRound(sideRound)
+        setEventWolfResults(sideRound.wolfResults || [])
+        setEventSkinsResults(sideRound.skinsResults || [])
+        setEventPokerResults(sideRound.pokerResults || [])
+      } else {
+        setEventSideRound(null)
+        setEventWolfResults([])
+        setEventSkinsResults([])
+        setEventPokerResults([])
+      }
+
+      const targetHole = Number(freshGroup.current_hole) || 1
+      hydrateEventHoleForm(fullEvent, freshGroup, targetHole, sideRound)
+      syncEventUrl(fullEvent.event_code)
+      setScreen('event-scoring')
+    } catch (eventError) {
+      console.error(eventError)
+      setError(eventError.message || 'Could not open event scoring.')
+    } finally {
+      setEventScoreLoading(false)
+    }
+  }
+
+  function changeEventHoleScore(playerId, delta) {
+    setEventHoleScores(current => {
+      const raw = current[playerId]
+      const base = raw === '' || raw == null ? eventHolePar : Number(raw)
+      const next = Math.min(20, Math.max(1, base + delta))
+      return { ...current, [playerId]: String(next) }
+    })
+  }
+
+  function setEventScoreValue(playerId, value) {
+    const digits = String(value).replace(/[^0-9]/g, '')
+    const next = digits === '' ? '' : String(Math.min(20, Math.max(1, Number(digits))))
+    setEventHoleScores(current => ({ ...current, [playerId]: next }))
+  }
+
+  async function goToEventHole(nextHole) {
+    if (!joinedEvent?.id || !joinedEventGroup?.id) return
+    const safeHole = Math.min(18, Math.max(1, Number(nextHole) || 1))
+
+    try {
+      const fullEvent = await refreshEvent(joinedEvent.id)
+      const freshGroup = fullEvent.groups.find(group => group.id === joinedEventGroup.id)
+      if (!freshGroup) return
+      setJoinedEventGroup(freshGroup)
+
+      let sideRound = eventSideRound
+      if (freshGroup.round_id) {
+        sideRound = await fetchEventSideRound(freshGroup.round_id)
+        setEventSideRound(sideRound)
+        setEventWolfResults(sideRound.wolfResults || [])
+        setEventSkinsResults(sideRound.skinsResults || [])
+        setEventPokerResults(sideRound.pokerResults || [])
+      }
+
+      hydrateEventHoleForm(fullEvent, freshGroup, safeHole, sideRound)
+    } catch (eventError) {
+      console.error(eventError)
+      setError(eventError.message || 'Could not load that hole.')
+    }
+  }
+
+  function getEventSideGame(gameType) {
+    return eventSideRound?.games?.find(game => game.game_type === gameType) || null
+  }
+
+  function getEventSideRoundScore(roundPlayerId, scoreRows, playerMap) {
+    const eventPlayerId = [...playerMap.entries()].find(
+      ([, roundPlayer]) => roundPlayer.id === roundPlayerId
+    )?.[0]
+
+    return scoreRows.find(row => row.player.id === eventPlayerId)?.score ?? null
+  }
+
+  function getEventWolfOutcome(scoreRows, playerMap, par) {
+    if (!eventSideRound || !eventWolfPlayerId) return null
+
+    const wolf = eventSideRound.players.find(player => player.id === eventWolfPlayerId)
+    if (!wolf) return null
+
+    const partner = eventWolfPartnerId
+      ? eventSideRound.players.find(player => player.id === eventWolfPartnerId)
+      : null
+
+    const wolfSideIds = [wolf.id, ...(partner ? [partner.id] : [])]
+    const opponents = eventSideRound.players.filter(player => !wolfSideIds.includes(player.id))
+
+    const wolfSideScores = wolfSideIds
+      .map(id => getEventSideRoundScore(id, scoreRows, playerMap))
+      .filter(value => Number.isFinite(value))
+
+    const opponentScores = opponents
+      .map(player => getEventSideRoundScore(player.id, scoreRows, playerMap))
+      .filter(value => Number.isFinite(value))
+
+    if (!wolfSideScores.length || !opponentScores.length) return null
+
+    const wolfBest = Math.min(...wolfSideScores)
+    const opponentBest = Math.min(...opponentScores)
+
+    let result = 'tie'
+    let winningBest = null
+
+    if (wolfBest < opponentBest) {
+      result = 'win'
+      winningBest = wolfBest
+    } else if (wolfBest > opponentBest) {
+      result = 'loss'
+      winningBest = opponentBest
+    }
+
+    let scoreType = 'normal'
+    if (winningBest != null && winningBest <= par - 2) {
+      scoreType = 'eagle'
+    } else if (winningBest != null && winningBest === par - 1) {
+      scoreType = 'birdie'
+    }
+
+    const settings = getEventSideGame('wolf')?.settings || {}
+    const multiplier =
+      result === 'tie'
+        ? 1
+        : scoreType === 'eagle'
+          ? Number(settings.eagleMultiplier || 3)
+          : scoreType === 'birdie'
+            ? Number(settings.birdieMultiplier || 2)
+            : 1
+
+    let stake = 1
+    for (let index = eventWolfResults.length - 1; index >= 0; index -= 1) {
+      if (eventWolfResults[index].result === 'tie') {
+        stake += 1
+      } else {
+        break
+      }
+    }
+
+    return {
+      round_id: eventSideRound.id,
+      hole: eventCurrentHole,
+      wolf_player_id: wolf.id,
+      partner_player_id: partner?.id || null,
+      result,
+      stake,
+      score_type: scoreType,
+      multiplier
+    }
+  }
+
+  function getEventSkinsOutcome(scoreRows, playerMap) {
+    if (!eventSideRound) return null
+
+    const settings = getSkinsSettings(eventSideRound)
+    const currentSkinValue = getCurrentSkinsValue(eventSideRound, eventSkinsResults)
+
+    if (settings.mode === 'team') {
+      const teams = getSkinsTeams(eventSideRound)
+      if (teams.length !== 2) return null
+
+      const teamBest = team => Math.min(
+        ...team.players
+          .map(player => getEventSideRoundScore(player.id, scoreRows, playerMap))
+          .filter(value => Number.isFinite(value))
+      )
+
+      const firstBest = teamBest(teams[0])
+      const secondBest = teamBest(teams[1])
+
+      if (!Number.isFinite(firstBest) || !Number.isFinite(secondBest)) return null
+
+      const winnerTeam =
+        firstBest === secondBest
+          ? null
+          : firstBest < secondBest
+            ? teams[0].id
+            : teams[1].id
+
+      return {
+        round_id: eventSideRound.id,
+        hole: eventCurrentHole,
+        winner_player_id: null,
+        winner_team: winnerTeam,
+        skins_won: winnerTeam
+          ? settings.carryovers
+            ? currentSkinValue
+            : 1
+          : 0
+      }
+    }
+
+    const scoredPlayers = eventSideRound.players
+      .map(player => ({
+        player,
+        score: getEventSideRoundScore(player.id, scoreRows, playerMap)
+      }))
+      .filter(item => Number.isFinite(item.score))
+
+    if (!scoredPlayers.length) return null
+
+    const lowScore = Math.min(...scoredPlayers.map(item => item.score))
+    const winners = scoredPlayers.filter(item => item.score === lowScore)
+    const winnerPlayerId = winners.length === 1 ? winners[0].player.id : null
+
+    return {
+      round_id: eventSideRound.id,
+      hole: eventCurrentHole,
+      winner_player_id: winnerPlayerId,
+      winner_team: null,
+      skins_won: winnerPlayerId
+        ? settings.carryovers
+          ? currentSkinValue
+          : 1
+        : 0
+    }
+  }
+
+  function getEventPokerRows(scoreRows, playerMap, par) {
+    if (!eventSideRound) return []
+
+    const deck = createPokerDeck(`${eventSideRound.id}-${eventSideRound.round_code}`)
+
+    const previousResults = eventPokerResults.filter(
+      result => Number(result.hole) !== Number(eventCurrentHole)
+    )
+
+    let deckPosition = previousResults.reduce(
+      (total, result) => total + Number(result.cards_earned || 0),
+      0
+    )
+
+    return eventSideRound.players.map(player => {
+      const selection = {
+        ...(eventPokerSelections[player.id] || makeEmptyPokerSelection())
+      }
+
+      const score = getEventSideRoundScore(player.id, scoreRows, playerMap)
+
+      if (joinedEvent?.scoring_basis === 'nett' && Number.isFinite(score)) {
+        selection.nettBirdie = score === par - 1
+        selection.nettEagle = score === par - 2
+        selection.nettAlbatross = score <= par - 3
+      }
+
+      const { cards, fines, achievements } = calculatePokerSelection(selection)
+
+      if (deckPosition + cards > deck.length) {
+        throw new Error('The 52-card Poker deck has been exhausted.')
+      }
+
+      const dealtCards = deck.slice(deckPosition, deckPosition + cards)
+      deckPosition += cards
+
+      return {
+        round_id: eventSideRound.id,
+        player_id: player.id,
+        hole: eventCurrentHole,
+        cards_earned: cards,
+        fines,
+        achievements: {
+          events: achievements,
+          cards: dealtCards
+        }
+      }
+    })
+  }
+
+  function getEventPotPositions() {
+    if (!eventSideRound) return []
+
+    const combined = calculateCombinedPositions(
+      eventSideRound,
+      eventWolfResults,
+      eventSkinsResults,
+      eventPokerResults
+    )
+
+    return eventSideRound.players.map(player => ({
+      player,
+      ...(combined[player.id] || {
+        wolf: 0,
+        skins: 0,
+        poker: 0,
+        total: 0
+      })
+    }))
+  }
+
+
+  function getEventWolfStandings() {
+    if (!eventSideRound || !getEventSideGame('wolf')) return []
+
+    const totals = calculateWolfPoints(
+      eventSideRound,
+      eventWolfResults
+    )
+
+    return [...eventSideRound.players]
+      .map(player => ({
+        player,
+        points: Number(totals[player.id] || 0)
+      }))
+      .sort((a, b) => {
+        if (a.points !== b.points) return b.points - a.points
+        return a.player.name.localeCompare(b.player.name)
+      })
+  }
+
+  function getEventSkinsStandings() {
+    if (!eventSideRound || !getEventSideGame('skins')) return []
+
+    const settings = getSkinsSettings(eventSideRound)
+    const totals = calculateSkinsTotals(
+      eventSideRound,
+      eventSkinsResults
+    )
+
+    if (settings.mode === 'team') {
+      return getSkinsTeams(eventSideRound)
+        .map(team => ({
+          id: team.id,
+          label: team.label,
+          skins: team.players.length
+            ? Number(totals[team.players[0].id] || 0)
+            : 0
+        }))
+        .sort((a, b) => b.skins - a.skins)
+    }
+
+    return [...eventSideRound.players]
+      .map(player => ({
+        id: player.id,
+        label: player.name,
+        skins: Number(totals[player.id] || 0)
+      }))
+      .sort((a, b) => {
+        if (a.skins !== b.skins) return b.skins - a.skins
+        return a.label.localeCompare(b.label)
+      })
+  }
+
+  function getEventPokerStandings() {
+    if (!eventSideRound || !getEventSideGame('poker')) return []
+
+    const totals = calculatePokerTotals(
+      eventSideRound,
+      eventPokerResults
+    )
+
+    const hands = calculatePokerHands(
+      eventSideRound,
+      eventPokerResults
+    )
+
+    const rows = eventSideRound.players.map(player => {
+      const cards = hands[player.id] || []
+      const hand = getBestDisplayPokerHand(cards)
+      const total = totals[player.id] || {
+        cards: 0,
+        fines: 0
+      }
+
+      return {
+        player,
+        cards,
+        hand,
+        fines: Number(total.fines || 0)
+      }
+    })
+
+    rows.sort((a, b) => {
+      if (a.hand && b.hand) {
+        const comparison = comparePokerHands(
+          a.hand,
+          b.hand
+        )
+
+        if (comparison !== 0) return -comparison
+      } else if (a.hand && !b.hand) {
+        return -1
+      } else if (!a.hand && b.hand) {
+        return 1
+      }
+
+      if (a.cards.length !== b.cards.length) {
+        return b.cards.length - a.cards.length
+      }
+
+      if (a.fines !== b.fines) {
+        return a.fines - b.fines
+      }
+
+      return a.player.name.localeCompare(b.player.name)
+    })
+
+    let previous = null
+    let previousRank = 0
+
+    return rows.map((row, index) => {
+      let tied = false
+
+      if (previous) {
+        if (row.hand && previous.hand) {
+          tied =
+            comparePokerHands(
+              row.hand,
+              previous.hand
+            ) === 0
+        } else {
+          tied =
+            !row.hand &&
+            !previous.hand &&
+            row.cards.length === previous.cards.length
+        }
+      }
+
+      const rank = tied
+        ? previousRank
+        : index + 1
+
+      previous = row
+      previousRank = rank
+
+      return {
+        ...row,
+        rank
+      }
+    })
+  }
+
+  async function saveEventHole() {
+    if (!joinedEvent?.id || !joinedEventGroup?.id) return
+
+    setError('')
+    const players = joinedEventGroup.players || []
+    const scoreRows = players.map(player => ({
+      player,
+      score: Number(eventHoleScores[player.id])
+    }))
+
+    if (scoreRows.some(row => !Number.isInteger(row.score) || row.score < 1 || row.score > 20)) {
+      setError('Enter a score for every golfer before saving the hole.')
+      return
+    }
+
+    setEventScoreLoading(true)
+
+    try {
+      const scorer = await ensureAnonymousUser()
+
+      if (joinedEventGroup.scorer_user_id !== scorer.id) {
+        throw new Error('Only this group’s scorer can save these scores.')
+      }
+
+      const existingHole = (joinedEvent.holes || []).find(
+        hole => Number(hole.hole_number) === Number(eventCurrentHole)
+      )
+
+      if (!existingHole) {
+        const { error: holeError } = await supabase
+          .from('event_holes')
+          .insert({
+            event_id: joinedEvent.id,
+            hole_number: eventCurrentHole,
+            par: Number(eventHolePar)
+          })
+
+        if (holeError && holeError.code !== '23505') throw holeError
+      }
+
+      const rows = scoreRows.map(({ player, score }) => ({
+        event_id: joinedEvent.id,
+        group_id: joinedEventGroup.id,
+        event_player_id: player.id,
+        hole_number: eventCurrentHole,
+        score
+      }))
+
+      const { error: scoresError } = await supabase
+        .from('event_hole_scores')
+        .upsert(rows, { onConflict: 'event_player_id,hole_number' })
+
+      if (scoresError) throw scoresError
+
+      if (eventSideRound) {
+        const playerMap = makeEventRoundPlayerNameMap(joinedEventGroup, eventSideRound)
+
+        if (getEventSideGame('wolf')) {
+          await supabase
+            .from('wolf_results')
+            .delete()
+            .eq('round_id', eventSideRound.id)
+            .eq('hole', eventCurrentHole)
+
+          const wolfRow = getEventWolfOutcome(scoreRows, playerMap, Number(eventHolePar))
+
+          if (wolfRow) {
+            const { error } = await supabase
+              .from('wolf_results')
+              .insert(wolfRow)
+
+            if (error) throw error
+          }
+        }
+
+        if (getEventSideGame('skins')) {
+          await supabase
+            .from('skins_results')
+            .delete()
+            .eq('round_id', eventSideRound.id)
+            .eq('hole', eventCurrentHole)
+
+          const skinsRow = getEventSkinsOutcome(scoreRows, playerMap)
+
+          if (skinsRow) {
+            const { error } = await supabase
+              .from('skins_results')
+              .insert(skinsRow)
+
+            if (error) throw error
+          }
+        }
+
+        if (getEventSideGame('poker')) {
+          await supabase
+            .from('poker_results')
+            .delete()
+            .eq('round_id', eventSideRound.id)
+            .eq('hole', eventCurrentHole)
+
+          const pokerRows = getEventPokerRows(scoreRows, playerMap, Number(eventHolePar))
+
+          const { error } = await supabase
+            .from('poker_results')
+            .insert(pokerRows)
+
+          if (error) throw error
+        }
+      }
+
+      const savedProgress = Number(joinedEventGroup.current_hole) || 1
+      const candidateNextHole = eventCurrentHole >= 18 ? 18 : eventCurrentHole + 1
+      const furthestHole = Math.max(savedProgress, candidateNextHole)
+      const wasCompleted = joinedEventGroup.status === 'completed'
+      const nowCompleted = wasCompleted || eventCurrentHole >= 18
+      const wasEditingEarlierHole = eventCurrentHole < savedProgress
+
+      const { error: groupError } = await supabase
+        .from('event_groups')
+        .update({
+          current_hole: furthestHole,
+          status: nowCompleted ? 'completed' : 'active'
+        })
+        .eq('id', joinedEventGroup.id)
+
+      if (groupError) throw groupError
+
+      if (eventSideRound) {
+        await supabase
+          .from('rounds')
+          .update({
+            current_hole: furthestHole,
+            status: nowCompleted ? 'completed' : 'active'
+          })
+          .eq('id', eventSideRound.id)
+      }
+
+      const fullEvent = await refreshEvent(joinedEvent.id)
+      const freshGroup = fullEvent.groups.find(group => group.id === joinedEventGroup.id)
+      setJoinedEventGroup(freshGroup)
+
+      let refreshedSideRound = eventSideRound
+
+      if (freshGroup?.round_id) {
+        refreshedSideRound = await fetchEventSideRound(freshGroup.round_id)
+        setEventSideRound(refreshedSideRound)
+        setEventWolfResults(refreshedSideRound.wolfResults || [])
+        setEventSkinsResults(refreshedSideRound.skinsResults || [])
+        setEventPokerResults(refreshedSideRound.pokerResults || [])
+      }
+
+      if (nowCompleted && !wasEditingEarlierHole && eventCurrentHole >= 18) {
+        setScreen('event-live')
+      } else {
+        const returnHole = wasEditingEarlierHole
+          ? savedProgress
+          : candidateNextHole
+
+        hydrateEventHoleForm(fullEvent, freshGroup, returnHole, refreshedSideRound)
+
+        window.requestAnimationFrame(() => {
+          window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+          })
+        })
+      }
+    } catch (eventError) {
+      console.error(eventError)
+      setError(eventError.message || 'Could not save the hole.')
+    } finally {
+      setEventScoreLoading(false)
+    }
+  }
+
+  async function openEventLive() {
+    if (!joinedEvent?.id) return
+    setError('')
+    setEventLoading(true)
+
+    try {
+      const fullEvent = await refreshEvent(joinedEvent.id)
+      setJoinedEvent(fullEvent)
+      syncEventUrl(fullEvent.event_code)
+      setScreen('event-live')
+    } catch (eventError) {
+      console.error(eventError)
+      setError(eventError.message || 'Could not open the live leaderboard.')
+    } finally {
+      setEventLoading(false)
+    }
+  }
+
   function openCreateRound() {
     setError('')
 
@@ -1761,6 +3138,64 @@ function App() {
     }
 
     openSharedRound()
+
+    return () => {
+      cancelled = true
+    }
+  }, [recoveringHost])
+
+  useEffect(() => {
+    if (recoveringHost || screen !== 'home') return
+
+    const params = new URLSearchParams(window.location.search)
+    const code = (params.get('event') || '').trim().toUpperCase()
+
+    if (!/^[A-Z0-9]{5}$/.test(code)) return
+
+    let cancelled = false
+
+    async function openSharedEvent() {
+      setError('')
+      setEventLoading(true)
+
+      try {
+        const user = await ensureAnonymousUser()
+        const event = await fetchEventByCode(code)
+
+        if (cancelled) return
+
+        if (!event) {
+          setEventJoinCode(code)
+          setError('Event not found.')
+          setScreen('join-event')
+          return
+        }
+
+        const ownGroup = event.groups.find(group => group.scorer_user_id === user.id) || null
+        const isOrganiser = event.organiser_user_id === user.id
+
+        setEventJoinCode(code)
+        setJoinedEvent(event)
+        setJoinedEventGroup(ownGroup)
+
+        if (ownGroup || isOrganiser) {
+          setScreen('event-lobby')
+        } else {
+          setScreen('event-live')
+        }
+      } catch (eventError) {
+        if (cancelled) return
+
+        console.error(eventError)
+        setEventJoinCode(code)
+        setError(eventError.message || 'Could not open the shared event.')
+        setScreen('join-event')
+      } finally {
+        if (!cancelled) setEventLoading(false)
+      }
+    }
+
+    openSharedEvent()
 
     return () => {
       cancelled = true
@@ -3460,6 +4895,103 @@ function formatMoney(value) {
     }
   }, [screen, joinedRound?.id])
 
+  useEffect(() => {
+    if (!['event-lobby', 'event-live', 'event-scoring'].includes(screen) || !joinedEvent?.id) return undefined
+
+    const refreshCurrentEvent = async () => {
+      try {
+        await refreshEvent(joinedEvent.id)
+      } catch (eventError) {
+        console.error(eventError)
+      }
+    }
+
+    const channel = supabase
+      .channel(`event-live-${joinedEvent.id}-${screen}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'event_groups',
+          filter: `event_id=eq.${joinedEvent.id}`
+        },
+        refreshCurrentEvent
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'event_players',
+          filter: `event_id=eq.${joinedEvent.id}`
+        },
+        refreshCurrentEvent
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'event_holes',
+          filter: `event_id=eq.${joinedEvent.id}`
+        },
+        refreshCurrentEvent
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'event_hole_scores',
+          filter: `event_id=eq.${joinedEvent.id}`
+        },
+        refreshCurrentEvent
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [screen, joinedEvent?.id])
+
+  useEffect(() => {
+    if (!['event-lobby', 'event-live', 'event-scoring'].includes(screen) || !joinedEvent?.id) {
+      return undefined
+    }
+
+    const refreshEventWhenVisible = async () => {
+      if (document.visibilityState !== 'visible') return
+
+      try {
+        const fullEvent = await refreshEvent(joinedEvent.id)
+        const freshGroup = joinedEventGroup
+          ? fullEvent.groups.find(group => group.id === joinedEventGroup.id)
+          : null
+
+        if (freshGroup) {
+          setJoinedEventGroup(freshGroup)
+        }
+
+        if (screen === 'event-scoring' && freshGroup?.round_id) {
+          const sideRound = await fetchEventSideRound(freshGroup.round_id)
+          setEventSideRound(sideRound)
+          setEventWolfResults(sideRound.wolfResults || [])
+          setEventSkinsResults(sideRound.skinsResults || [])
+          setEventPokerResults(sideRound.pokerResults || [])
+        }
+      } catch (eventError) {
+        console.error('Event foreground refresh failed:', eventError)
+      }
+    }
+
+    document.addEventListener('visibilitychange', refreshEventWhenVisible)
+
+    return () => {
+      document.removeEventListener('visibilitychange', refreshEventWhenVisible)
+    }
+  }, [screen, joinedEvent?.id, joinedEventGroup?.id])
+
   if (recoveringHost) {
     return (
       <main className="app-shell">
@@ -3534,7 +5066,981 @@ function formatMoney(value) {
                 {userProfile ? `My Profile · ${userProfile.display_name}` : 'Create My Profile'}
               </button>
             </div>
+
+            <div className="home-event-actions">
+              <div className="home-event-label">MULTI-GROUP EVENTS</div>
+              <div className="home-event-buttons">
+                <button className="secondary-button" onClick={openCreateEvent}>
+                  Create Event
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setError('')
+                    setJoinedEvent(null)
+                    setJoinedEventGroup(null)
+                    setEventJoinCode('')
+                    setScreen('join-event')
+                  }}
+                >
+                  Join Event
+                </button>
+              </div>
+            </div>
           </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'create-event') {
+    return (
+      <main className="app-shell">
+        <section className="create-shell event-shell">
+          <button className="back-button" onClick={() => setScreen('home')}>← Back</button>
+
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="create-header">
+            <p className="eyebrow">NEW EVENT</p>
+            <h1>Start the event.</h1>
+            <p className="intro">Create the event and share the code. Each group scorer enters their own group.</p>
+          </div>
+
+          <div className="form-card event-setup-card">
+            <div className="form-section">
+              <label className="field-label" htmlFor="event-name">Event name</label>
+              <input
+                id="event-name"
+                value={eventName}
+                onChange={event => setEventName(event.target.value)}
+                placeholder="e.g. THE POT Invitational"
+                maxLength={80}
+              />
+            </div>
+
+            <div className="form-section">
+              <h2>Scoring basis</h2>
+              <p className="viewer-note">Every group will use the same score basis for the event and side games.</p>
+              <div className="segmented">
+                {[
+                  ['nett', 'Nett'],
+                  ['gross', 'Gross']
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={eventScoringBasis === value ? 'segment active' : 'segment'}
+                    onClick={() => setEventScoringBasis(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {error && <div className="error-message">{error}</div>}
+
+            <button
+              className="primary-button create-button"
+              type="button"
+              onClick={createEvent}
+              disabled={eventLoading}
+            >
+              {eventLoading ? 'Creating Event...' : 'Create Event'}
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'event-created' && createdEvent) {
+    return (
+      <main className="app-shell">
+        <section className="create-shell event-shell">
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="success-card event-success-card">
+            <p className="eyebrow">EVENT CREATED</p>
+            <h1>{createdEvent.name}</h1>
+            <p className="event-code-label">Event code</p>
+            <div className="event-code">{createdEvent.event_code}</div>
+            <p className="success-copy">
+              {createdEvent.scoring_basis === 'nett' ? 'Nett' : 'Gross'} scoring
+            </p>
+            <p className="viewer-note">Share this code with the group scorers. Each scorer enters their own group and the field builds itself.</p>
+
+            <button
+              className="secondary-button event-share-button"
+              type="button"
+              onClick={() => shareEvent(createdEvent.event_code)}
+            >
+              Share Event Link
+            </button>
+            {shareStatus && <p className="share-status event-share-status">{shareStatus}</p>}
+
+            <button className="primary-button" type="button" onClick={() => openEventLobby(createdEvent)}>
+              Open Event Lobby
+            </button>
+            <button
+              className="secondary-button event-live-button"
+              type="button"
+              onClick={() => {
+                setJoinedEvent(createdEvent)
+                setScreen('event-live')
+              }}
+            >
+              View Live Leaderboard
+            </button>
+            <button className="tertiary-button" type="button" onClick={leaveEvent}>
+              Back to Home
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'join-event') {
+    return (
+      <main className="app-shell">
+        <section className="create-shell event-shell">
+          <button className="back-button" onClick={leaveEvent}>← Back</button>
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="create-header">
+            <p className="eyebrow">JOIN EVENT</p>
+            <h1>Enter your group.</h1>
+            <p className="intro">Enter the event code, then add the golfers you are scoring.</p>
+          </div>
+
+          <div className="form-card event-join-card">
+            <label className="field-label" htmlFor="event-code-input">Event code</label>
+            <div className="event-code-entry">
+              <input
+                id="event-code-input"
+                className="join-code-input"
+                value={eventJoinCode}
+                onChange={event => {
+                  setEventJoinCode(event.target.value.toUpperCase())
+                  setJoinedEvent(null)
+                  setJoinedEventGroup(null)
+                }}
+                placeholder="ABCDE"
+                maxLength={5}
+                autoCapitalize="characters"
+              />
+              <button className="primary-button" type="button" onClick={findEvent} disabled={eventLoading}>
+                {eventLoading ? 'Finding...' : 'Find Event'}
+              </button>
+            </div>
+
+            {error && <div className="error-message">{error}</div>}
+
+            {joinedEvent && (
+              <div className="event-found">
+                <div className="event-found-header">
+                  <div>
+                    <p className="eyebrow">{joinedEvent.event_code}</p>
+                    <h2>{joinedEvent.name}</h2>
+                  </div>
+                  <span className="event-basis-pill">{joinedEvent.scoring_basis === 'nett' ? 'Nett' : 'Gross'}</span>
+                </div>
+
+                <button
+                  className="secondary-button event-view-live-button"
+                  type="button"
+                  onClick={openEventLive}
+                  disabled={eventLoading}
+                >
+                  View Live Leaderboard
+                </button>
+
+                {joinedEventGroup ? (
+                  <div className="event-your-group-banner">
+                    <span>Your group is already entered</span>
+                    <strong>Group {joinedEventGroup.group_number}</strong>
+                    <p>{(joinedEventGroup.players || []).map(player => player.display_name).join(' · ')}</p>
+                    <button className="primary-button" type="button" onClick={() => setScreen('event-lobby')}>
+                      Open Group
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {savedGroups.length > 0 && (
+                      <div className="form-section event-saved-groups">
+                        <h3>Saved Groups</h3>
+                        <p className="viewer-note">Got the usual crew saved? Load them in one tap.</p>
+                        <div className="event-saved-group-list">
+                          {savedGroups.map(group => (
+                            <button
+                              key={group.id}
+                              type="button"
+                              className="saved-group-chip"
+                              onClick={() => loadSavedGroupIntoEvent(group)}
+                            >
+                              {group.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="form-section">
+                      <h3>Golfers in your group</h3>
+                      <div className="segmented">
+                        {[2, 3, 4].map(count => (
+                          <button
+                            key={count}
+                            type="button"
+                            className={eventEntryPlayerCount === count ? 'segment active' : 'segment'}
+                            onClick={() => setEventEntryPlayerCount(count)}
+                          >
+                            {count}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="player-inputs event-entry-player-inputs">
+                      {eventEntryPlayerNames.slice(0, eventEntryPlayerCount).map((player, playerIndex) => (
+                        <input
+                          key={`event-entry-player-${playerIndex}`}
+                          value={player}
+                          onChange={event => updateEventEntryPlayer(playerIndex, event.target.value)}
+                          placeholder={`Golfer ${playerIndex + 1}`}
+                          maxLength={50}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="form-section event-games-setup">
+                      <div className="event-games-heading">
+                        <h3>Your group's games</h3>
+                        <p className="viewer-note">Optional. These only affect your fourball's pot — not the event leaderboard.</p>
+                      </div>
+
+                      <div className="event-game-toggle-grid">
+                        <button
+                          type="button"
+                          className={eventWolfEnabled ? 'event-game-toggle active' : 'event-game-toggle'}
+                          onClick={() => setEventWolfEnabled(value => !value)}
+                        >
+                          Wolf
+                        </button>
+                        <button
+                          type="button"
+                          className={eventSkinsEnabled ? 'event-game-toggle active' : 'event-game-toggle'}
+                          onClick={() => setEventSkinsEnabled(value => !value)}
+                        >
+                          Skins
+                        </button>
+                        <button
+                          type="button"
+                          className={eventPokerEnabled ? 'event-game-toggle active' : 'event-game-toggle'}
+                          onClick={() => setEventPokerEnabled(value => !value)}
+                        >
+                          3-Putt Poker
+                        </button>
+                      </div>
+
+                      {eventWolfEnabled && (
+                        <div className="event-game-settings-card">
+                          <strong>Wolf</strong>
+                          <div className="event-settings-grid">
+                            <label>
+                              $ / point
+                              <input type="number" min="0" step="0.5" value={eventWolfDollarPoint} onChange={event => setEventWolfDollarPoint(event.target.value)} />
+                            </label>
+                            <label>
+                              Birdie ×
+                              <input type="number" min="1" step="1" value={eventBirdieMultiplier} onChange={event => setEventBirdieMultiplier(event.target.value)} />
+                            </label>
+                            <label>
+                              Eagle ×
+                              <input type="number" min="1" step="1" value={eventEagleMultiplier} onChange={event => setEventEagleMultiplier(event.target.value)} />
+                            </label>
+                          </div>
+                        </div>
+                      )}
+
+                      {eventSkinsEnabled && (
+                        <div className="event-game-settings-card">
+                          <strong>Skins</strong>
+
+                          <div className="event-inline-choice">
+                            <button
+                              type="button"
+                              className={eventSkinsMode === 'individual' ? 'event-mini-choice active' : 'event-mini-choice'}
+                              onClick={() => setEventSkinsMode('individual')}
+                            >
+                              Individual
+                            </button>
+                            <button
+                              type="button"
+                              className={eventSkinsMode === 'team' ? 'event-mini-choice active' : 'event-mini-choice'}
+                              onClick={() => setEventSkinsMode('team')}
+                              disabled={eventEntryPlayerCount !== 4}
+                            >
+                              Team
+                            </button>
+                          </div>
+
+                          {eventSkinsMode === 'team' && eventEntryPlayerCount === 4 && (
+                            <div className="event-inline-choice event-team-pairings">
+                              <button type="button" className={eventSkinsTeamPairing === '12v34' ? 'event-mini-choice active' : 'event-mini-choice'} onClick={() => setEventSkinsTeamPairing('12v34')}>1+2 v 3+4</button>
+                              <button type="button" className={eventSkinsTeamPairing === '13v24' ? 'event-mini-choice active' : 'event-mini-choice'} onClick={() => setEventSkinsTeamPairing('13v24')}>1+3 v 2+4</button>
+                              <button type="button" className={eventSkinsTeamPairing === '14v23' ? 'event-mini-choice active' : 'event-mini-choice'} onClick={() => setEventSkinsTeamPairing('14v23')}>1+4 v 2+3</button>
+                            </div>
+                          )}
+
+                          <div className="event-settings-grid two-col">
+                            <label>
+                              $ / skin
+                              <input type="number" min="0" step="0.5" value={eventSkinsDollar} onChange={event => setEventSkinsDollar(event.target.value)} />
+                            </label>
+
+                            <label className="event-checkbox-setting">
+                              <input type="checkbox" checked={eventSkinsCarryovers} onChange={event => setEventSkinsCarryovers(event.target.checked)} />
+                              Carryovers
+                            </label>
+                          </div>
+                        </div>
+                      )}
+
+                      {eventPokerEnabled && (
+                        <div className="event-game-settings-card">
+                          <strong>3-Putt Poker</strong>
+                          <div className="event-settings-grid two-col">
+                            <label>
+                              Buy-in
+                              <input type="number" min="0" step="1" value={eventPokerBuyIn} onChange={event => setEventPokerBuyIn(event.target.value)} />
+                            </label>
+                            <label>
+                              Fine $
+                              <input type="number" min="0" step="1" value={eventPokerFineValue} onChange={event => setEventPokerFineValue(event.target.value)} />
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="primary-button create-button"
+                      onClick={enterEventGroup}
+                      disabled={eventLoading}
+                    >
+                      {eventLoading ? 'Entering Group...' : 'Enter Group'}
+                    </button>
+                  </>
+                )}
+
+                {joinedEvent.groups.length > 0 && (
+                  <div className="event-group-list event-existing-groups">
+                    <p className="viewer-note">{joinedEvent.groups.length} group{joinedEvent.groups.length === 1 ? '' : 's'} entered so far.</p>
+                    {joinedEvent.groups.map(group => (
+                      <div className="event-lobby-group" key={group.id}>
+                        <div>
+                          <div className="event-group-title-row">
+                            <strong>Group {group.group_number}</strong>
+                            <span className="group-status ready">Entered</span>
+                          </div>
+                          <p>{(group.players || []).map(player => player.display_name).join(' · ')}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'event-lobby' && joinedEvent) {
+    const enteredGroupCount = joinedEvent.groups.length
+    const isOrganiser = Boolean(authUser?.id && joinedEvent.organiser_user_id === authUser.id)
+
+    return (
+      <main className="app-shell">
+        <section className="create-shell event-shell">
+          <button
+            className="back-button"
+            onClick={isOrganiser ? leaveEvent : () => setScreen('join-event')}
+          >
+            ← Back
+          </button>
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="create-header event-lobby-header">
+            <p className="eyebrow">EVENT · {joinedEvent.event_code}</p>
+            <h1>{joinedEvent.name}</h1>
+            <p className="intro">
+              {enteredGroupCount} group{enteredGroupCount === 1 ? '' : 's'} entered · {joinedEvent.scoring_basis === 'nett' ? 'Nett' : 'Gross'} scoring
+            </p>
+
+            <div className="event-header-actions">
+              <button
+                className="refresh-link"
+                type="button"
+                onClick={() => shareEvent(joinedEvent.event_code)}
+              >
+                <svg className="event-share-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="18" cy="5" r="3" />
+                  <circle cx="6" cy="12" r="3" />
+                  <circle cx="18" cy="19" r="3" />
+                  <path d="m8.6 10.7 6.8-4.1M8.6 13.3l6.8 4.1" />
+                </svg>
+                <span>Share Event</span>
+              </button>
+              {shareStatus && <span className="event-share-inline-status">{shareStatus}</span>}
+            </div>
+          </div>
+
+          {joinedEventGroup && (
+            <div className="event-your-group-banner">
+              <span>Your group</span>
+              <strong>Group {joinedEventGroup.group_number}</strong>
+              <p>{(joinedEventGroup.players || []).map(player => player.display_name).join(' · ')}</p>
+              <div className="event-group-actions">
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={openEventScoring}
+                  disabled={eventScoreLoading}
+                >
+                  {joinedEventGroup.status === 'completed'
+                    ? 'Review Scores'
+                    : joinedEventGroup.status === 'active'
+                      ? 'Continue Scoring'
+                      : 'Start Scoring'}
+                </button>
+                <button className="secondary-button" type="button" onClick={openEventLive}>
+                  Live Leaderboard
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="event-group-list event-lobby-list">
+            {joinedEvent.groups.map(group => (
+              <div className="event-lobby-group" key={group.id}>
+                <div>
+                  <div className="event-group-title-row">
+                    <strong>Group {group.group_number}</strong>
+                    <span className={group.scorer_user_id ? 'group-status ready' : 'group-status waiting'}>
+                      Entered
+                    </span>
+                  </div>
+                  <p>{(group.players || []).map(player => player.display_name).join(' · ')}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {!joinedEventGroup && (
+            <button className="primary-button event-lobby-live-button" type="button" onClick={openEventLive}>
+              Open Live Leaderboard
+            </button>
+          )}
+
+          <div className="event-stage-note">
+            <strong>Live scoring</strong>
+            <span>Each group scorer enters one {joinedEvent.scoring_basis === 'nett' ? 'nett' : 'gross'} score per golfer. The event table updates automatically.</span>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'event-scoring' && joinedEvent && joinedEventGroup) {
+    const existingPar = (joinedEvent.holes || []).some(
+      hole => Number(hole.hole_number) === Number(eventCurrentHole)
+    )
+
+    return (
+      <main className="app-shell">
+        <section className="create-shell event-shell event-score-shell">
+          <button className="back-button" onClick={() => setScreen('event-lobby')}>← Event</button>
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="event-score-topbar">
+            <div>
+              <p className="eyebrow">{joinedEvent.name} · GROUP {joinedEventGroup.group_number}</p>
+              {eventCurrentHole < Number(joinedEventGroup.current_hole || 1) && (
+                <p className="event-editing-note">
+                  Editing Hole {eventCurrentHole} · your group stays at Hole {joinedEventGroup.current_hole}
+                </p>
+              )}
+              <h1>Hole {eventCurrentHole}</h1>
+            </div>
+            <button className="tertiary-button event-score-live-link" type="button" onClick={openEventLive}>
+              Live Table
+            </button>
+          </div>
+
+          <div className="event-score-meta">
+            <span>{joinedEvent.scoring_basis === 'nett' ? 'Nett' : 'Gross'} scoring</span>
+            <span>Hole {eventCurrentHole} / 18</span>
+          </div>
+
+          <div className="form-card event-hole-card">
+            <div className="event-par-row">
+              <div>
+                <span className="field-label">Par</span>
+                <p className="viewer-note">
+                  {existingPar ? 'Already set for this hole.' : 'Par 4 by default. Change it only if needed.'}
+                </p>
+              </div>
+
+              <div className="event-par-selector">
+                {[3, 4, 5].map(par => (
+                  <button
+                    key={par}
+                    type="button"
+                    className={Number(eventHolePar) === par ? 'event-par-button active' : 'event-par-button'}
+                    onClick={() => !existingPar && setEventHolePar(par)}
+                    disabled={existingPar}
+                  >
+                    {par}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="event-score-list">
+              {(joinedEventGroup.players || []).map(player => {
+                const rawScore = eventHoleScores[player.id]
+                const numericScore = rawScore === '' || rawScore == null ? null : Number(rawScore)
+                const relative = numericScore == null ? null : numericScore - Number(eventHolePar)
+
+                return (
+                  <div className="event-player-score-row" key={player.id}>
+                    <div className="event-player-score-name">
+                      <strong>{player.display_name}</strong>
+                      <span>
+                        {relative == null
+                          ? joinedEvent.scoring_basis === 'nett' ? 'Nett score' : 'Gross score'
+                          : relative === 0
+                            ? 'Par'
+                            : relative < 0
+                              ? `${Math.abs(relative)} under`
+                              : `${relative} over`}
+                      </span>
+                    </div>
+
+                    <div className="event-score-stepper">
+                      <button
+                        type="button"
+                        aria-label={`Decrease ${player.display_name} score`}
+                        onClick={() => changeEventHoleScore(player.id, -1)}
+                      >
+                        −
+                      </button>
+                      <input
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={rawScore ?? ''}
+                        onChange={event => setEventScoreValue(player.id, event.target.value)}
+                        placeholder={String(eventHolePar)}
+                        aria-label={`${player.display_name} score`}
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Increase ${player.display_name} score`}
+                        onClick={() => changeEventHoleScore(player.id, 1)}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {eventSideRound?.games?.length > 0 && (
+              <div className="event-side-games-live">
+                <div className="event-side-games-title">
+                  <span className="field-label">Your group's pot</span>
+                  <span>{eventSideRound.games.map(game => game.game_type === 'poker' ? '3-Putt Poker' : game.game_type[0].toUpperCase() + game.game_type.slice(1)).join(' · ')}</span>
+                </div>
+
+                {getEventSideGame('wolf') && (
+                  <div className="event-side-game-card">
+                    <div className="event-side-game-card-heading">
+                      <strong>Wolf</strong>
+                      <span>Winner calculated from the scores above</span>
+                    </div>
+
+                    <div className="event-wolf-control">
+                      <span className="event-control-label">Wolf</span>
+                      <div className="event-inline-choice">
+                        {eventSideRound.players.map(player => (
+                          <button
+                            key={player.id}
+                            type="button"
+                            className={eventWolfPlayerId === player.id ? 'event-mini-choice active' : 'event-mini-choice'}
+                            onClick={() => {
+                              setEventWolfPlayerId(player.id)
+                              if (eventWolfPartnerId === player.id) setEventWolfPartnerId('')
+                            }}
+                          >
+                            {player.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="event-wolf-control">
+                      <span className="event-control-label">Partner</span>
+                      <div className="event-inline-choice">
+                        <button
+                          type="button"
+                          className={!eventWolfPartnerId ? 'event-mini-choice active' : 'event-mini-choice'}
+                          onClick={() => setEventWolfPartnerId('')}
+                        >
+                          Lone Wolf
+                        </button>
+                        {eventSideRound.players.filter(player => player.id !== eventWolfPlayerId).map(player => (
+                          <button
+                            key={player.id}
+                            type="button"
+                            className={eventWolfPartnerId === player.id ? 'event-mini-choice active' : 'event-mini-choice'}
+                            onClick={() => setEventWolfPartnerId(player.id)}
+                          >
+                            {player.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {getEventSideGame('skins') && (
+                  <div className="event-side-game-card compact">
+                    <div className="event-side-game-card-heading">
+                      <strong>Skins</strong>
+                      <span>
+                        {getSkinsSettings(eventSideRound).mode === 'team'
+                          ? 'Best-ball team result calculates automatically'
+                          : 'Lowest unique score wins automatically'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {getEventSideGame('poker') && (
+                  <div className="event-side-game-card">
+                    <div className="event-side-game-card-heading">
+                      <strong>3-Putt Poker</strong>
+                      <span>
+                        {joinedEvent.scoring_basis === 'nett'
+                          ? 'Nett birdie / eagle / albatross are picked up from the score automatically.'
+                          : 'Tap any Poker events that happened on the hole.'}
+                      </span>
+                    </div>
+
+                    <div className="event-poker-player-list">
+                      {eventSideRound.players.map(player => {
+                        const selection = eventPokerSelections[player.id] || makeEmptyPokerSelection()
+                        const buttons = [
+                          ['onePutt', '1-Putt'],
+                          ...(joinedEvent.scoring_basis === 'nett'
+                            ? []
+                            : [
+                                ['nettBirdie', 'Nett Birdie'],
+                                ['nettEagle', 'Nett Eagle'],
+                                ['nettAlbatross', 'Nett Albatross']
+                              ]),
+                          ['chipIn', 'Chip-In'],
+                          ['threePutt', '3-Putt'],
+                          ['fourPutt', '4-Putt'],
+                          ['wipe', 'Wipe']
+                        ]
+
+                        return (
+                          <div className="event-poker-player" key={player.id}>
+                            <strong>{player.name}</strong>
+                            <div className="event-poker-buttons">
+                              {buttons.map(([field, label]) => (
+                                <button
+                                  key={field}
+                                  type="button"
+                                  className={selection[field] ? 'event-poker-button active' : 'event-poker-button'}
+                                  onClick={() => {
+                                    setEventPokerSelections(current => {
+                                      const existing = current[player.id] || makeEmptyPokerSelection()
+                                      const next = { ...existing, [field]: !existing[field] }
+
+                                      if (field === 'threePutt' && next.threePutt) next.fourPutt = false
+                                      if (field === 'fourPutt' && next.fourPutt) next.threePutt = false
+
+                                      return { ...current, [player.id]: next }
+                                    })
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {getEventSideGame('wolf') && (
+                  <div className="event-game-standings-block">
+                    <div className="event-game-standings-heading">
+                      <strong>Wolf Standings</strong>
+                      <span>Points</span>
+                    </div>
+
+                    <div className="event-game-standings-list">
+                      {getEventWolfStandings().map((row, index) => (
+                        <div className="event-game-standing-row" key={row.player.id}>
+                          <span className="event-standing-rank">{index + 1}</span>
+                          <span className="event-standing-name">{row.player.name}</span>
+                          <strong>
+                            {row.points > 0 ? '+' : ''}
+                            {row.points}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {getEventSideGame('skins') && (
+                  <div className="event-game-standings-block">
+                    <div className="event-game-standings-heading">
+                      <strong>Skins Standings</strong>
+                      <span>
+                        {getSkinsSettings(eventSideRound).mode === 'team'
+                          ? 'Teams'
+                          : 'Skins won'}
+                      </span>
+                    </div>
+
+                    <div className="event-game-standings-list">
+                      {getEventSkinsStandings().map((row, index) => (
+                        <div className="event-game-standing-row" key={row.id}>
+                          <span className="event-standing-rank">{index + 1}</span>
+                          <span className="event-standing-name">{row.label}</span>
+                          <strong>
+                            {row.skins} {row.skins === 1 ? 'skin' : 'skins'}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {getEventSideGame('poker') && (
+                  <div className="event-game-standings-block event-poker-standings">
+                    <div className="event-game-standings-heading">
+                      <strong>3-Putt Poker Leaderboard</strong>
+                      <span>Live hands</span>
+                    </div>
+
+                    <div className="event-poker-leaderboard-list">
+                      {getEventPokerStandings().map(row => (
+                        <div className="event-poker-leader-row" key={row.player.id}>
+                          <span className="event-standing-rank">{row.rank}</span>
+
+                          <div className="event-poker-leader-main">
+                            <div className="event-poker-leader-name">
+                              <strong>{row.player.name}</strong>
+                              <span>
+                                {row.hand
+                                  ? row.hand.name
+                                  : 'No hand yet'}
+                                {' · '}
+                                {row.fines} {row.fines === 1 ? 'fine' : 'fines'}
+                              </span>
+                            </div>
+
+                            <div className="event-poker-cards" aria-label={`${row.player.name} cards`}>
+                              {row.cards.length ? (
+                                row.cards.map((card, cardIndex) => (
+                                  <span className="event-playing-card" key={`${row.player.id}-${card}-${cardIndex}`}>
+                                    {formatPokerCard(card)}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="event-no-cards">No cards yet</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="event-game-standings-block event-pot-standings">
+                  <div className="event-game-standings-heading">
+                    <strong>Group Live Pot</strong>
+                    <span>Combined</span>
+                  </div>
+
+                  <div className="event-live-pot-mini">
+                    {getEventPotPositions().map(position => (
+                      <div key={position.player.id}>
+                        <span>{position.player.name}</span>
+                        <strong>{formatMoney(position.total)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {error && <div className="error-message">{error}</div>}
+
+            <button
+              className="primary-button create-button event-save-hole-button"
+              type="button"
+              onClick={saveEventHole}
+              disabled={eventScoreLoading}
+            >
+              {eventScoreLoading ? 'Saving...' : eventCurrentHole === 18 ? 'Finish Round' : 'Save Hole'}
+            </button>
+
+            <div className="event-hole-navigation">
+              <button
+                className="tertiary-button"
+                type="button"
+                disabled={eventCurrentHole <= 1 || eventScoreLoading}
+                onClick={() => goToEventHole(eventCurrentHole - 1)}
+              >
+                ← Previous
+              </button>
+              <button
+                className="tertiary-button"
+                type="button"
+                disabled={eventCurrentHole >= 18 || eventScoreLoading}
+                onClick={() => goToEventHole(eventCurrentHole + 1)}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (screen === 'event-live' && joinedEvent) {
+    const leaderboard = buildEventLeaderboard(joinedEvent)
+    const playersWithScores = leaderboard.filter(player => player.thru > 0).length
+
+    return (
+      <main className="app-shell">
+        <section className="create-shell event-shell event-live-shell">
+          <button
+            className="back-button"
+            onClick={() => setScreen(joinedEventGroup ? 'event-lobby' : 'join-event')}
+          >
+            ← Back
+          </button>
+
+          <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          <div className="event-live-header">
+            <div>
+              <p className="eyebrow">LIVE · {joinedEvent.event_code}</p>
+              <h1>{joinedEvent.name}</h1>
+              <p className="intro">
+                {joinedEvent.scoring_basis === 'nett' ? 'Nett' : 'Gross'} · {joinedEvent.groups.length} group{joinedEvent.groups.length === 1 ? '' : 's'} · {playersWithScores} scoring
+              </p>
+            </div>
+            <div className="event-live-actions">
+              <div className="live-badge">
+                <span className="live-dot"></span>
+                LIVE
+              </div>
+
+              <button
+                type="button"
+                className="refresh-link"
+                onClick={async () => {
+                  try {
+                    setEventLoading(true)
+                    await refreshEvent(joinedEvent.id)
+                  } finally {
+                    setEventLoading(false)
+                  }
+                }}
+                disabled={eventLoading}
+              >
+                <svg className="refresh-link-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 6v5h-5" />
+                  <path d="M19.2 15a8 8 0 1 1-1.7-8.7L20 8.5" />
+                </svg>
+                <span>{eventLoading ? 'Refreshing...' : 'Refresh'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="refresh-link"
+                onClick={() => shareEvent(joinedEvent.event_code)}
+              >
+                <svg className="event-share-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="18" cy="5" r="3" />
+                  <circle cx="6" cy="12" r="3" />
+                  <circle cx="18" cy="19" r="3" />
+                  <path d="m8.6 10.7 6.8-4.1M8.6 13.3l6.8 4.1" />
+                </svg>
+                <span>Share</span>
+              </button>
+            </div>
+          </div>
+
+          {shareStatus && <p className="share-status event-share-status">{shareStatus}</p>}
+
+          <div className="event-leaderboard-card">
+            <div className="event-leaderboard-head">
+              <span>Pos</span>
+              <span>Golfer</span>
+              <span>Thru</span>
+              <span>Score</span>
+            </div>
+
+            {leaderboard.length === 0 ? (
+              <div className="event-leaderboard-empty">
+                No groups have entered yet.
+              </div>
+            ) : (
+              leaderboard.map(player => (
+                <div
+                  className={player.thru > 0 ? 'event-leaderboard-row' : 'event-leaderboard-row not-started'}
+                  key={player.id}
+                >
+                  <strong className="event-position">
+                    {player.thru > 0 ? player.position : '—'}
+                  </strong>
+                  <div className="event-leaderboard-player">
+                    <strong>{player.display_name}</strong>
+                    <span>Group {player.group_number}</span>
+                  </div>
+                  <span>{player.thru || '—'}</span>
+                  <strong className="event-to-par">
+                    {formatEventToPar(player.toPar, player.thru)}
+                  </strong>
+                </div>
+              ))
+            )}
+          </div>
+
+          <p className="event-live-footnote">
+            Scores update automatically as each group locks in a hole.
+          </p>
         </section>
       </main>
     )
