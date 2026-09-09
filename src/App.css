@@ -948,13 +948,67 @@ select option {
   }
 }
 
-/* THE POT — live viewer refresh controls */
+/* THE POT — in-round live + refresh controls */
 
-.viewer-live-actions {
+.viewer-live-actions,
+.round-topbar-actions {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+}
+
+.live-refresh-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.live-refresh-row .live-badge {
+  margin-bottom: 0;
+}
+
+.refresh-link {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: auto;
+  min-height: 40px;
+  padding: 7px 2px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--pot-sage-light, #A9C2AF);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.refresh-link:hover {
+  color: var(--cream);
+}
+
+.refresh-link:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.refresh-link-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .viewer-refresh-button {
@@ -964,10 +1018,38 @@ select option {
   margin: 0;
 }
 
+.host-round-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.host-round-meta .hole-progress {
+  padding-bottom: 0;
+}
+
+.host-round-meta .active-share-button {
+  margin: 0;
+}
+
 @media (max-width: 600px) {
+  .live-refresh-row {
+    gap: 10px;
+  }
+
+  .refresh-link {
+    min-height: 38px;
+    font-size: 0.85rem;
+  }
+
   .viewer-refresh-button {
     font-size: 0.85rem;
     padding: 7px 12px;
+  }
+
+  .host-round-meta {
+    gap: 8px;
   }
 }
 
@@ -1967,4 +2049,3 @@ button:disabled {
     grid-column: 1;
   }
 }
-

@@ -4199,19 +4199,29 @@ function formatMoney(value) {
           </div>
 
           <div className="viewer-live-actions">
-            <div className="live-badge">
-              <span className="live-dot"></span>
-              LIVE
-            </div>
+            <div className="live-refresh-row">
+              <div className="live-badge">
+                <span className="live-dot"></span>
+                LIVE
+              </div>
 
-            <button
-              type="button"
-              className="secondary-button viewer-refresh-button"
-              onClick={refreshLiveViewer}
-              disabled={loading}
-            >
-              {loading ? 'Refreshing...' : 'Refresh'}
-            </button>
+              <button
+                type="button"
+                className="refresh-link"
+                onClick={refreshLiveViewer}
+                disabled={loading}
+              >
+                <svg
+                  className="refresh-link-icon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d="M20 6v5h-5" />
+                  <path d="M19.2 15a8 8 0 1 1-1.7-8.7L20 8.5" />
+                </svg>
+                <span>{loading ? 'Refreshing...' : 'Refresh'}</span>
+              </button>
+            </div>
 
             <button
               type="button"
@@ -4693,26 +4703,43 @@ function formatMoney(value) {
           </div>
 
           <div className="round-topbar-actions">
-            <div className="hole-progress">
-              {Math.min(activeRound.holeIndex + 1, 18)} / 18
+            <div className="live-refresh-row">
+              <div className="live-badge">
+                <span className="live-dot"></span>
+                LIVE
+              </div>
+
+              <button
+                type="button"
+                className="refresh-link"
+                onClick={refreshHostRound}
+                disabled={loading}
+              >
+                <svg
+                  className="refresh-link-icon"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d="M20 6v5h-5" />
+                  <path d="M19.2 15a8 8 0 1 1-1.7-8.7L20 8.5" />
+                </svg>
+                <span>{loading ? 'Refreshing...' : 'Refresh'}</span>
+              </button>
             </div>
 
-            <button
-              type="button"
-              className="secondary-button viewer-refresh-button"
-              onClick={refreshHostRound}
-              disabled={loading}
-            >
-              {loading ? 'Refreshing...' : 'Refresh'}
-            </button>
+            <div className="host-round-meta">
+              <div className="hole-progress">
+                {Math.min(activeRound.holeIndex + 1, 18)} / 18
+              </div>
 
-            <button
-              type="button"
-              className="secondary-button active-share-button"
-              onClick={() => shareRound(activeRound.round_code)}
-            >
-              Share Round
-            </button>
+              <button
+                type="button"
+                className="secondary-button active-share-button"
+                onClick={() => shareRound(activeRound.round_code)}
+              >
+                Share Round
+              </button>
+            </div>
           </div>
         </div>
 
