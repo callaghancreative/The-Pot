@@ -5122,7 +5122,7 @@ function formatMoney(value) {
             <div className="form-section">
               <h2>Scoring basis</h2>
               <p className="viewer-note">Every group will use the same score basis for the event and side games.</p>
-              <div className="segmented">
+              <div className="segmented segmented--labels">
                 {[
                   ['nett', 'Nett'],
                   ['gross', 'Gross']

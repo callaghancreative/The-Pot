@@ -251,7 +251,26 @@ select {
   font-weight: 700;
 }
 
+/* Text-label toggles (e.g. Nett / Gross) size to their content
+   instead of the fixed digit width used for player counts. */
+.segmented--labels .segment {
+  width: auto;
+  min-width: 96px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding-left: 24px;
+  padding-right: 24px;
+}
+
 /* INPUTS */
+
+.field-label {
+  display: block;
+  margin-bottom: 10px;
+}
 
 .player-inputs {
   display: grid;
@@ -691,6 +710,11 @@ select option {
   color: var(--sage);
 
   font-size: 12px;
+}
+
+.event-setup-card .viewer-note {
+  text-align: left;
+  margin-bottom: 24px;
 }
 
 .game-scoring-block {
