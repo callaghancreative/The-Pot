@@ -2937,6 +2937,12 @@ button:disabled {
   gap: 7px;
 }
 
+/* Inside a game settings card the mode selector sits directly above the
+   $ inputs — give it breathing room underneath. */
+.event-game-settings-card .event-inline-choice {
+  margin-bottom: 12px;
+}
+
 .event-mini-choice {
   min-height: 36px;
   padding: 7px 12px;
@@ -2949,7 +2955,7 @@ button:disabled {
 }
 
 .event-team-pairings {
-  margin-top: 10px;
+  margin-top: 0;
   margin-bottom: 12px;
 }
 
