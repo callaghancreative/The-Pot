@@ -2645,10 +2645,13 @@ function App() {
 
     setError('')
     const players = joinedEventGroup.players || []
-    const scoreRows = players.map(player => ({
-      player,
-      score: Number(eventHoleScores[player.id])
-    }))
+    const defaultPar = Number(eventHolePar)
+    const scoreRows = players.map(player => {
+      const raw = eventHoleScores[player.id]
+      // An untouched field shows par as a placeholder — treat that as a par score.
+      const score = raw === '' || raw == null ? defaultPar : Number(raw)
+      return { player, score }
+    })
 
     if (scoreRows.some(row => !Number.isInteger(row.score) || row.score < 1 || row.score > 20)) {
       setError('Enter a score for every golfer before saving the hole.')

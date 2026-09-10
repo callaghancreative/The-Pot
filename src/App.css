@@ -2206,10 +2206,19 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: stretch;
+  /* Spacing from the label lives here so the input can drop its own
+     margin-top and stretch to the same height as the button. */
+  margin-top: 12px;
+}
+
+.event-code-entry .join-code-input {
+  margin-top: 0;
 }
 
 .event-code-entry .primary-button {
   margin: 0;
+  /* Match the event-code input beside it rather than a full pill. */
+  border-radius: 14px;
 }
 
 .event-found {
@@ -2546,14 +2555,18 @@ button:disabled {
 }
 
 .event-par-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 42px;
-  padding: 8px;
+  padding: 0;
   border: 1.5px solid var(--gold);
   border-radius: 999px;
   background: transparent;
   color: var(--gold);
   font: inherit;
   font-weight: 800;
+  line-height: 1;
   cursor: pointer;
 }
 
@@ -2609,6 +2622,9 @@ button:disabled {
 }
 
 .event-score-stepper button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 42px;
   height: 42px;
   padding: 0;
