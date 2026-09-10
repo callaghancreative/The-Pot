@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import './App.css'
-import '@fontsource/inter/400.css'
-import '@fontsource/inter/600.css'
-import '@fontsource/bricolage-grotesque/700.css'
+// Latin subset only — the app ships English copy. The bare `400.css`
+// entrypoints pull cyrillic/greek/vietnamese/latin-ext too (~20 extra
+// font files into the precache) for no benefit here.
+import '@fontsource/inter/latin-400.css'
+import '@fontsource/inter/latin-600.css'
+import '@fontsource/bricolage-grotesque/latin-700.css'
 import { supabase } from './lib/supabase'
 
 function makeEventCode() {
@@ -1582,6 +1585,37 @@ function App() {
     throw new Error('Could not generate a unique event code.')
   }
 
+  async function fetchEventChildren(eventId) {
+    // Groups / players / holes / scores only depend on the event id, so
+    // fetch them in one round-trip batch instead of four serial ones —
+    // this runs on every realtime change and every foreground refresh.
+    const [groupsRes, playersRes, holesRes, scoresRes] = await Promise.all([
+      supabase.from('event_groups').select('*').eq('event_id', eventId).order('group_number'),
+      supabase.from('event_players').select('*').eq('event_id', eventId).order('player_order'),
+      supabase.from('event_holes').select('*').eq('event_id', eventId).order('hole_number'),
+      supabase.from('event_hole_scores').select('*').eq('event_id', eventId).order('hole_number')
+    ])
+
+    if (groupsRes.error) throw groupsRes.error
+    if (playersRes.error) throw playersRes.error
+    if (holesRes.error) throw holesRes.error
+    if (scoresRes.error) throw scoresRes.error
+
+    const eventPlayers = playersRes.data || []
+    const hydratedGroups = (groupsRes.data || []).map(group => ({
+      ...group,
+      players: eventPlayers
+        .filter(player => player.group_id === group.id)
+        .sort((a, b) => Number(a.player_order) - Number(b.player_order))
+    }))
+
+    return {
+      groups: hydratedGroups,
+      holes: holesRes.data || [],
+      scores: scoresRes.data || []
+    }
+  }
+
   async function fetchEventByCode(code) {
     const { data: event, error: eventError } = await supabase
       .from('events')
@@ -1592,65 +1626,24 @@ function App() {
     if (eventError) throw eventError
     if (!event) return null
 
-    const { data: groups, error: groupsError } = await supabase
-      .from('event_groups')
-      .select('*')
-      .eq('event_id', event.id)
-      .order('group_number')
-
-    if (groupsError) throw groupsError
-
-    const { data: eventPlayers, error: playersError } = await supabase
-      .from('event_players')
-      .select('*')
-      .eq('event_id', event.id)
-      .order('player_order')
-
-    if (playersError) throw playersError
-
-    const { data: eventHoles, error: holesError } = await supabase
-      .from('event_holes')
-      .select('*')
-      .eq('event_id', event.id)
-      .order('hole_number')
-
-    if (holesError) throw holesError
-
-    const { data: eventScores, error: scoresError } = await supabase
-      .from('event_hole_scores')
-      .select('*')
-      .eq('event_id', event.id)
-      .order('hole_number')
-
-    if (scoresError) throw scoresError
-
-    const hydratedGroups = (groups || []).map(group => ({
-      ...group,
-      players: (eventPlayers || [])
-        .filter(player => player.group_id === group.id)
-        .sort((a, b) => Number(a.player_order) - Number(b.player_order))
-    }))
-
-    return {
-      ...event,
-      groups: hydratedGroups,
-      holes: eventHoles || [],
-      scores: eventScores || []
-    }
+    const children = await fetchEventChildren(event.id)
+    return { ...event, ...children }
   }
 
   async function refreshEvent(eventId, setter = setJoinedEvent) {
     if (!eventId) return null
 
-    const { data: event, error: eventError } = await supabase
-      .from('events')
-      .select('*')
-      .eq('id', eventId)
-      .single()
+    // Fetch the event row and its children together; previously this made a
+    // serial `events`-by-id lookup and then fetchEventByCode re-queried the
+    // same `events` row by code before four more serial child queries.
+    const [eventRes, children] = await Promise.all([
+      supabase.from('events').select('*').eq('id', eventId).single(),
+      fetchEventChildren(eventId)
+    ])
 
-    if (eventError) throw eventError
+    if (eventRes.error) throw eventRes.error
 
-    const fullEvent = await fetchEventByCode(event.event_code)
+    const fullEvent = { ...eventRes.data, ...children }
     setter(fullEvent)
     return fullEvent
   }
@@ -1812,43 +1805,35 @@ function App() {
   async function fetchEventSideRound(roundId) {
     if (!roundId) return null
 
-    const { data: round, error: roundError } = await supabase
-      .from('rounds')
-      .select('*')
-      .eq('id', roundId)
-      .single()
-
-    if (roundError) throw roundError
-
-    const { data: roundPlayers, error: playersError } = await supabase
-      .from('players')
-      .select('*')
-      .eq('round_id', roundId)
-      .order('player_order')
-
-    if (playersError) throw playersError
-
-    const { data: games, error: gamesError } = await supabase
-      .from('round_games')
-      .select('*')
-      .eq('round_id', roundId)
-
-    if (gamesError) throw gamesError
-
-    const [wolfResponse, skinsResponse, pokerResponse] = await Promise.all([
+    // All six queries key off roundId alone — run them as one batch rather
+    // than three serial requests followed by a batch of three.
+    const [
+      roundRes,
+      playersRes,
+      gamesRes,
+      wolfResponse,
+      skinsResponse,
+      pokerResponse
+    ] = await Promise.all([
+      supabase.from('rounds').select('*').eq('id', roundId).single(),
+      supabase.from('players').select('*').eq('round_id', roundId).order('player_order'),
+      supabase.from('round_games').select('*').eq('round_id', roundId),
       supabase.from('wolf_results').select('*').eq('round_id', roundId).order('hole'),
       supabase.from('skins_results').select('*').eq('round_id', roundId).order('hole'),
       supabase.from('poker_results').select('*').eq('round_id', roundId).order('hole')
     ])
 
+    if (roundRes.error) throw roundRes.error
+    if (playersRes.error) throw playersRes.error
+    if (gamesRes.error) throw gamesRes.error
     if (wolfResponse.error) throw wolfResponse.error
     if (skinsResponse.error) throw skinsResponse.error
     if (pokerResponse.error) throw pokerResponse.error
 
     return {
-      ...round,
-      players: roundPlayers || [],
-      games: games || [],
+      ...roundRes.data,
+      players: playersRes.data || [],
+      games: gamesRes.data || [],
       wolfResults: wolfResponse.data || [],
       skinsResults: skinsResponse.data || [],
       pokerResults: pokerResponse.data || []
