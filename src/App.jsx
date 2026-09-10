@@ -824,6 +824,95 @@ function formatPokerCard(card) {
   return `${rank}${suits[suit] || suit}`
 }
 
+// ---------------------------------------------------------------------------
+// Single-group scoring: derive the side-game outcomes from the gross scores
+// the scorer enters for each player on a hole, so they don't have to key the
+// results in by hand. A blank / non-positive score is treated as "not entered".
+// ---------------------------------------------------------------------------
+
+function parseHoleScore(value) {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? number : null
+}
+
+// Wolf win / tie / loss plus the winning score type (normal / birdie / eagle),
+// comparing the wolf side's best ball against the opponents' best ball.
+function deriveWolfOutcome({ players, wolfPlayerId, partnerPlayerId, scoreByPlayerId, par }) {
+  if (!wolfPlayerId) return null
+
+  const wolfSideIds = [wolfPlayerId, ...(partnerPlayerId ? [partnerPlayerId] : [])]
+  const opponentIds = players
+    .map(player => player.id)
+    .filter(id => !wolfSideIds.includes(id))
+
+  const wolfScores = wolfSideIds.map(id => parseHoleScore(scoreByPlayerId[id])).filter(v => v != null)
+  const opponentScores = opponentIds.map(id => parseHoleScore(scoreByPlayerId[id])).filter(v => v != null)
+
+  if (!wolfScores.length || !opponentScores.length) return null
+
+  const wolfBest = Math.min(...wolfScores)
+  const opponentBest = Math.min(...opponentScores)
+
+  let result = 'tie'
+  let winningBest = null
+  if (wolfBest < opponentBest) {
+    result = 'win'
+    winningBest = wolfBest
+  } else if (wolfBest > opponentBest) {
+    result = 'loss'
+    winningBest = opponentBest
+  }
+
+  let scoreType = 'normal'
+  if (winningBest != null && par) {
+    if (winningBest <= par - 2) scoreType = 'eagle'
+    else if (winningBest === par - 1) scoreType = 'birdie'
+  }
+
+  return { result, scoreType, wolfBest, opponentBest }
+}
+
+// Skins winner: the lowest unique gross score (or the lower team best ball).
+// Returns '' when the hole is tied / not enough scores are in.
+function deriveSkinsWinnerId({ players, mode, teams, scoreByPlayerId }) {
+  if (mode === 'team' && teams?.length === 2) {
+    const teamBest = team => {
+      const scores = team.players
+        .map(player => parseHoleScore(scoreByPlayerId[player.id]))
+        .filter(v => v != null)
+      return scores.length ? Math.min(...scores) : null
+    }
+
+    const first = teamBest(teams[0])
+    const second = teamBest(teams[1])
+    if (first == null || second == null || first === second) return ''
+    return first < second ? teams[0].id : teams[1].id
+  }
+
+  const scored = players
+    .map(player => ({ id: player.id, score: parseHoleScore(scoreByPlayerId[player.id]) }))
+    .filter(item => item.score != null)
+
+  if (!scored.length) return ''
+
+  const lowScore = Math.min(...scored.map(item => item.score))
+  const winners = scored.filter(item => item.score === lowScore)
+  return winners.length === 1 ? winners[0].id : ''
+}
+
+// Nett birdie / eagle / albatross pickups implied by a single score vs par.
+function nettPokerFlagsFromScore(value, par) {
+  const score = parseHoleScore(value)
+  if (score == null || !par) {
+    return { nettBirdie: false, nettEagle: false, nettAlbatross: false }
+  }
+  return {
+    nettBirdie: score === par - 1,
+    nettEagle: score === par - 2,
+    nettAlbatross: score <= par - 3
+  }
+}
+
 const HOST_SESSION_KEY = 'thePotHostSession'
 
 async function ensureAnonymousUser() {
@@ -945,16 +1034,23 @@ function App() {
   const [activeRound, setActiveRound] = useState(null)
   const [wolfResults, setWolfResults] = useState([])
 
+  // Single-group scoring: the gross score the scorer is entering per player for
+  // the current hole, plus that hole's par. The side-game controls below are
+  // derived from these unless the scorer taps a control to override it — an
+  // override is stored as a non-null value, `null` means "use the derived one".
+  const [holeScores, setHoleScores] = useState({})
+  const [holePar, setHolePar] = useState(4)
+
   const [wolfPlayerId, setWolfPlayerId] = useState('')
   const [partnerPlayerId, setPartnerPlayerId] = useState('')
-  const [wolfResult, setWolfResult] = useState('win')
-  const [scoreType, setScoreType] = useState('normal')
-  
+  const [wolfResult, setWolfResult] = useState(null)
+  const [scoreType, setScoreType] = useState(null)
+
   const [viewerWolfResults, setViewerWolfResults] = useState([])
   const [viewerSkinsResults, setViewerSkinsResults] = useState([])
 
   const [skinsResults, setSkinsResults] = useState([])
-  const [skinsWinnerId, setSkinsWinnerId] = useState('')
+  const [skinsWinnerId, setSkinsWinnerId] = useState(null)
   const [pokerResults, setPokerResults] = useState([])
   const [pokerSelections, setPokerSelections] = useState({})
   const [viewerPokerResults, setViewerPokerResults] = useState([])
@@ -2988,7 +3084,8 @@ function App() {
           gamesResponse,
           wolfResponse,
           skinsResponse,
-          pokerResponse
+          pokerResponse,
+          holeScoresResponse
         ] = await Promise.all([
           supabase
             .from('players')
@@ -3013,7 +3110,11 @@ function App() {
             .from('poker_results')
             .select('*')
             .eq('round_id', round.id)
-            .order('created_at', { ascending: true })
+            .order('created_at', { ascending: true }),
+          supabase
+            .from('round_hole_scores')
+            .select('*')
+            .eq('round_id', round.id)
         ])
 
         const firstError = [
@@ -3021,16 +3122,20 @@ function App() {
           gamesResponse.error,
           wolfResponse.error,
           skinsResponse.error,
-          pokerResponse.error
+          pokerResponse.error,
+          holeScoresResponse.error
         ].find(Boolean)
 
         if (firstError) throw firstError
         if (cancelled) return
 
+        const roundHoleScores = holeScoresResponse.data || []
+
         const recoveredRound = {
           ...round,
           players: playersResponse.data || [],
-          games: gamesResponse.data || []
+          games: gamesResponse.data || [],
+          scores: roundHoleScores
         }
 
         const sequence = buildHoleSequence(round.starting_hole)
@@ -3061,12 +3166,10 @@ function App() {
           )
 
           setWolfPlayerId(scheduledWolf?.id || '')
-          setPartnerPlayerId('')
-          setWolfResult('win')
-          setScoreType('normal')
-          setSkinsWinnerId('')
-          setPokerSelections(
-            makePokerSelections(recoveredRound.players)
+          resetHoleInputs(
+            recoveredRound.players,
+            roundHoleScores,
+            sequence[holeIndex]
           )
         }
 
@@ -3379,6 +3482,46 @@ function App() {
     })
   }
 
+  // --- Single-group hole score entry -------------------------------------
+  function changeHoleScore(playerId, delta) {
+    setHoleScores(current => {
+      const raw = current[playerId]
+      const base = raw === '' || raw == null ? holePar : Number(raw)
+      const next = Math.min(20, Math.max(1, base + delta))
+      return { ...current, [playerId]: String(next) }
+    })
+  }
+
+  function setHoleScoreValue(playerId, value) {
+    const digits = String(value).replace(/[^0-9]/g, '')
+    const next = digits === '' ? '' : String(Math.min(20, Math.max(1, Number(digits))))
+    setHoleScores(current => ({ ...current, [playerId]: next }))
+  }
+
+  // Pull the saved gross scores (if any) for one hole out of a
+  // round_hole_scores array, so a re-opened / recovered hole pre-fills.
+  function readRoundHole(scoreRows, hole) {
+    const rows = (scoreRows || []).filter(row => Number(row.hole) === Number(hole))
+    const scores = {}
+    rows.forEach(row => {
+      scores[row.player_id] = row.score == null ? '' : String(row.score)
+    })
+    const par = rows.find(row => row.par)?.par
+    return { scores, par: par ? Number(par) : 4 }
+  }
+
+  // Reset the current-hole inputs back to "derive everything from scores".
+  function resetHoleInputs(players, savedRows, hole) {
+    const { scores, par } = readRoundHole(savedRows, hole)
+    setHoleScores(scores)
+    setHolePar(par)
+    setPartnerPlayerId('')
+    setWolfResult(null)
+    setScoreType(null)
+    setSkinsWinnerId(null)
+    setPokerSelections(makePokerSelections(players || []))
+  }
+
   function leaveRound() {
     const shouldLeave = window.confirm(
       'Leave this round on this device? The round will remain saved, but this device will stop automatically restoring it.'
@@ -3402,10 +3545,12 @@ function App() {
 
     setWolfPlayerId('')
     setPartnerPlayerId('')
-    setWolfResult('win')
-    setScoreType('normal')
-    setSkinsWinnerId('')
+    setWolfResult(null)
+    setScoreType(null)
+    setSkinsWinnerId(null)
     setPokerSelections({})
+    setHoleScores({})
+    setHolePar(4)
 
     setJoinCode('')
     setError('')
@@ -3460,6 +3605,69 @@ function App() {
 
     /*
       -------------------------
+      GROSS SCORES + DERIVED OUTCOMES
+      A blank field counts as par. Everything below (Wolf result / score
+      type, Skins winner, poker nett birdie·eagle·albatross) is derived from
+      these unless the scorer overrode a control (non-null state value).
+      -------------------------
+    */
+
+    const par = Number(holePar) || 4
+
+    const scoreByPlayerId = {}
+    activeRound.players.forEach(player => {
+      const raw = holeScores[player.id]
+      scoreByPlayerId[player.id] =
+        raw === '' || raw == null ? par : Number(raw)
+    })
+
+    const badScore = activeRound.players.find(player => {
+      const value = scoreByPlayerId[player.id]
+      return !Number.isInteger(value) || value < 1 || value > 20
+    })
+
+    if (badScore) {
+      setError('Enter a score between 1 and 20 for every golfer before locking the hole.')
+      setLoading(false)
+      return
+    }
+
+    const derivedWolf = deriveWolfOutcome({
+      players: activeRound.players,
+      wolfPlayerId,
+      partnerPlayerId,
+      scoreByPlayerId,
+      par
+    })
+
+    const derivedSkinsWinnerId = deriveSkinsWinnerId({
+      players: activeRound.players,
+      mode: getSkinsSettings(activeRound).mode,
+      teams: getSkinsTeams(activeRound),
+      scoreByPlayerId
+    })
+
+    const effectiveWolfResult = wolfResult ?? derivedWolf?.result ?? 'tie'
+    const effectiveScoreType = scoreType ?? derivedWolf?.scoreType ?? 'normal'
+    const effectiveSkinsWinnerId = skinsWinnerId ?? derivedSkinsWinnerId ?? ''
+
+    const savedScoreRows = activeRound.players.map(player => ({
+      round_id: activeRound.id,
+      player_id: player.id,
+      hole: currentHole,
+      score: scoreByPlayerId[player.id],
+      par
+    }))
+
+    const { data: upsertedScores, error: scoresError } = await supabase
+      .from('round_hole_scores')
+      .upsert(savedScoreRows, { onConflict: 'player_id,hole' })
+      .select()
+
+    if (scoresError) throw scoresError
+
+    /*
+      -------------------------
       WOLF
       -------------------------
     */
@@ -3474,13 +3682,13 @@ function App() {
 
       let multiplier = 1
 
-      if (scoreType === 'birdie') {
+      if (effectiveScoreType === 'birdie') {
         multiplier = Number(
           wolfSettings.birdieMultiplier || 2
         )
       }
 
-      if (scoreType === 'eagle') {
+      if (effectiveScoreType === 'eagle') {
         multiplier = Number(
           wolfSettings.eagleMultiplier || 3
         )
@@ -3506,11 +3714,11 @@ function App() {
         wolf_player_id: wolfPlayerId,
         partner_player_id:
           partnerPlayerId || null,
-        result: wolfResult,
+        result: effectiveWolfResult,
         stake,
-        score_type: scoreType,
+        score_type: effectiveScoreType,
         multiplier:
-          wolfResult === 'tie'
+          effectiveWolfResult === 'tie'
             ? 1
             : multiplier
       }
@@ -3548,7 +3756,7 @@ function App() {
         )
 
       const isTeamSkins = skinsSettings.mode === 'team'
-      const isTie = skinsWinnerId === ''
+      const isTie = effectiveSkinsWinnerId === ''
 
       const skinsWon = isTie
         ? 0
@@ -3559,8 +3767,8 @@ function App() {
       const skinsRow = {
         round_id: activeRound.id,
         hole: currentHole,
-        winner_player_id: !isTeamSkins && skinsWinnerId ? skinsWinnerId : null,
-        winner_team: isTeamSkins && skinsWinnerId ? skinsWinnerId : null,
+        winner_player_id: !isTeamSkins && effectiveSkinsWinnerId ? effectiveSkinsWinnerId : null,
+        winner_team: isTeamSkins && effectiveSkinsWinnerId ? effectiveSkinsWinnerId : null,
         skins_won: skinsWon
       }
 
@@ -3601,8 +3809,13 @@ function App() {
       let deckPosition = cardsAlreadyDealt
 
       const pokerRows = activeRound.players.map(player => {
-        const selection =
-          pokerSelections[player.id] || makeEmptyPokerSelection()
+        // Manual toggles (1-putt / chip-in / 3-putt / 4-putt / wipe) as the
+        // scorer set them, with the nett birdie·eagle·albatross pickups
+        // filled in automatically from this player's score against par.
+        const selection = {
+          ...(pokerSelections[player.id] || makeEmptyPokerSelection()),
+          ...nettPokerFlagsFromScore(scoreByPlayerId[player.id], par)
+        }
 
         const {
           cards,
@@ -3652,6 +3865,13 @@ function App() {
     /*
       Update local results
     */
+
+    const mergedRoundScores = [
+      ...(activeRound.scores || []).filter(
+        row => Number(row.hole) !== Number(currentHole)
+      ),
+      ...(upsertedScores || [])
+    ]
 
     if (newWolfResult) {
       setWolfResults(current => [
@@ -3716,7 +3936,8 @@ function App() {
       setActiveRound({
         ...activeRound,
         status: 'completed',
-        holeIndex: 18
+        holeIndex: 18,
+        scores: mergedRoundScores
       })
 
       return
@@ -3748,20 +3969,16 @@ function App() {
     setActiveRound({
       ...activeRound,
       current_hole: nextHole,
-      holeIndex: nextIndex
+      holeIndex: nextIndex,
+      scores: mergedRoundScores
     })
 
     /*
-      Reset inputs
+      Reset inputs — back to deriving everything from the next hole's scores
     */
 
     setWolfPlayerId(nextWolf?.id || '')
-    setPartnerPlayerId('')
-    setWolfResult('win')
-    setScoreType('normal')
-
-    setSkinsWinnerId('')
-    setPokerSelections(makePokerSelections(activeRound.players))
+    resetHoleInputs(activeRound.players, mergedRoundScores, nextHole)
 
     requestAnimationFrame(() => {
       window.scrollTo({
@@ -3916,15 +4133,18 @@ function App() {
       setPartnerPlayerId(
         previousWolfResult?.partner_player_id || ''
       )
-      setWolfResult(
-        previousWolfResult?.result || 'win'
-      )
-      setScoreType(
-        previousWolfResult?.score_type || 'normal'
-      )
 
+      // Pre-fill the hole's saved gross scores so the scorer can adjust and
+      // re-lock; keep the previously locked side-game outcomes as overrides.
+      const undoneHole = readRoundHole(activeRound.scores, undoHole)
+      setHoleScores(undoneHole.scores)
+      setHolePar(undoneHole.par)
+      setWolfResult(previousWolfResult?.result ?? null)
+      setScoreType(previousWolfResult?.score_type ?? null)
       setSkinsWinnerId(
-        previousSkinsResult?.winner_team || previousSkinsResult?.winner_player_id || ''
+        previousSkinsResult?.winner_team ??
+        previousSkinsResult?.winner_player_id ??
+        null
       )
 
       const restoredPokerSelections =
@@ -4390,20 +4610,16 @@ function formatMoney(value) {
   setActiveRound({
     ...round,
     holeSequence: sequence,
-    holeIndex: 0
+    holeIndex: 0,
+    scores: []
   })
 
   setWolfResults([])
+  setSkinsResults([])
+  setPokerResults([])
 
   setWolfPlayerId(scheduledWolf?.id || '')
-  setPartnerPlayerId('')
-  setWolfResult('win')
-  setScoreType('normal')
-
-  setSkinsResults([])
-  setSkinsWinnerId('')
-  setPokerResults([])
-  setPokerSelections(makePokerSelections(round.players))
+  resetHoleInputs(round.players, [], sequence[0])
 
   setScreen('round')
 }
@@ -4752,7 +4968,8 @@ function formatMoney(value) {
         gamesResponse,
         wolfResponse,
         skinsResponse,
-        pokerResponse
+        pokerResponse,
+        holeScoresResponse
       ] = await Promise.all([
         supabase
           .from('rounds')
@@ -4782,7 +4999,11 @@ function formatMoney(value) {
           .from('poker_results')
           .select('*')
           .eq('round_id', activeRound.id)
-          .order('created_at', { ascending: true })
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('round_hole_scores')
+          .select('*')
+          .eq('round_id', activeRound.id)
       ])
 
       const firstError = [
@@ -4791,15 +5012,19 @@ function formatMoney(value) {
         gamesResponse.error,
         wolfResponse.error,
         skinsResponse.error,
-        pokerResponse.error
+        pokerResponse.error,
+        holeScoresResponse.error
       ].find(Boolean)
 
       if (firstError) throw firstError
 
+      const roundHoleScores = holeScoresResponse.data || []
+
       const refreshedRound = {
         ...roundResponse.data,
         players: playersResponse.data || [],
-        games: gamesResponse.data || []
+        games: gamesResponse.data || [],
+        scores: roundHoleScores
       }
 
       const sequence = buildHoleSequence(
@@ -4843,12 +5068,10 @@ function formatMoney(value) {
         )
 
         setWolfPlayerId(scheduledWolf?.id || '')
-        setPartnerPlayerId('')
-        setWolfResult('win')
-        setScoreType('normal')
-        setSkinsWinnerId('')
-        setPokerSelections(
-          makePokerSelections(refreshedRound.players)
+        resetHoleInputs(
+          refreshedRound.players,
+          roundHoleScores,
+          sequence[holeIndex]
         )
       }
     } catch (err) {
@@ -7121,6 +7344,47 @@ function formatMoney(value) {
     game => game.game_type === 'poker'
   )
 
+  // Side-game outcomes derived from the gross scores the scorer is entering
+  // for this hole. `wolfResult` / `scoreType` / `skinsWinnerId` are null until
+  // the scorer taps a control to override; effective values fall back to the
+  // derived ones.
+  const holeParValue = Number(holePar) || 4
+
+  const roundScoreByPlayerId = {}
+  activeRound.players.forEach(player => {
+    const raw = holeScores[player.id]
+    roundScoreByPlayerId[player.id] =
+      raw === '' || raw == null ? '' : Number(raw)
+  })
+
+  const allHoleScoresEntered = activeRound.players.every(
+    player => parseHoleScore(holeScores[player.id]) != null
+  )
+
+  const derivedWolfOutcome = hasWolf
+    ? deriveWolfOutcome({
+        players: activeRound.players,
+        wolfPlayerId,
+        partnerPlayerId,
+        scoreByPlayerId: roundScoreByPlayerId,
+        par: holeParValue
+      })
+    : null
+
+  const derivedSkinsWinnerId = hasSkins
+    ? deriveSkinsWinnerId({
+        players: activeRound.players,
+        mode: getSkinsSettings(activeRound).mode,
+        teams: getSkinsTeams(activeRound),
+        scoreByPlayerId: roundScoreByPlayerId
+      })
+    : ''
+
+  const effectiveWolfResult = wolfResult ?? derivedWolfOutcome?.result ?? null
+  const effectiveScoreType = scoreType ?? derivedWolfOutcome?.scoreType ?? 'normal'
+  const effectiveSkinsWinnerId =
+    skinsWinnerId ?? (allHoleScoresEntered ? derivedSkinsWinnerId : null)
+
   const totals = hasWolf
     ? calculateWolfPoints(activeRound, wolfResults)
     : {}
@@ -7264,6 +7528,82 @@ function formatMoney(value) {
         {!finished && (
           <div className="form-card">
 
+  {/* HOLE SCORES — side games are derived from these */}
+  <div className="form-section">
+    <div className="event-par-row">
+      <div>
+        <span className="field-label">Par</span>
+      </div>
+      <div className="event-par-selector">
+        {[3, 4, 5].map(par => (
+          <button
+            key={par}
+            type="button"
+            className={holeParValue === par ? 'event-par-button active' : 'event-par-button'}
+            onClick={() => setHolePar(par)}
+          >
+            {par}
+          </button>
+        ))}
+      </div>
+    </div>
+
+    <div className="event-score-list">
+      {activeRound.players.map(player => {
+        const rawScore = holeScores[player.id]
+        const numericScore = parseHoleScore(rawScore)
+        const relative = numericScore == null ? null : numericScore - holeParValue
+
+        return (
+          <div className="event-player-score-row" key={player.id}>
+            <div className="event-player-score-name">
+              <strong>{player.name}</strong>
+              <span>
+                {relative == null
+                  ? 'Gross score'
+                  : relative === 0
+                    ? 'Par'
+                    : relative < 0
+                      ? `${Math.abs(relative)} under`
+                      : `${relative} over`}
+              </span>
+            </div>
+
+            <div className="event-score-stepper">
+              <button
+                type="button"
+                aria-label={`Decrease ${player.name} score`}
+                onClick={() => changeHoleScore(player.id, -1)}
+              >
+                −
+              </button>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={rawScore ?? ''}
+                onChange={event => setHoleScoreValue(player.id, event.target.value)}
+                placeholder={String(holeParValue)}
+                aria-label={`${player.name} score`}
+              />
+              <button
+                type="button"
+                aria-label={`Increase ${player.name} score`}
+                onClick={() => changeHoleScore(player.id, 1)}
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+
+    <p className="viewer-note">
+      Wolf, Skins and 3-Putt Poker results are worked out from these scores. Leave a
+      field on par if it wasn&rsquo;t played out.
+    </p>
+  </div>
+
   {/* WOLF */}
   {hasWolf && (
     <>
@@ -7327,16 +7667,17 @@ function formatMoney(value) {
 
       <div className="form-section">
         <h2>Winning Score</h2>
+        <p className="viewer-note">Auto from the scores &mdash; tap to override.</p>
 
         <div className="choice-grid">
           <button
             type="button"
             className={
-              scoreType === 'normal'
+              effectiveScoreType === 'normal'
                 ? 'choice-button active'
                 : 'choice-button'
             }
-            onClick={() => setScoreType('normal')}
+            onClick={() => setScoreType(scoreType === 'normal' ? null : 'normal')}
           >
             Normal
           </button>
@@ -7344,11 +7685,11 @@ function formatMoney(value) {
           <button
             type="button"
             className={
-              scoreType === 'birdie'
+              effectiveScoreType === 'birdie'
                 ? 'choice-button active'
                 : 'choice-button'
             }
-            onClick={() => setScoreType('birdie')}
+            onClick={() => setScoreType(scoreType === 'birdie' ? null : 'birdie')}
           >
             Birdie ×{wolfSettings.birdieMultiplier || 2}
           </button>
@@ -7356,11 +7697,11 @@ function formatMoney(value) {
           <button
             type="button"
             className={
-              scoreType === 'eagle'
+              effectiveScoreType === 'eagle'
                 ? 'choice-button active'
                 : 'choice-button'
             }
-            onClick={() => setScoreType('eagle')}
+            onClick={() => setScoreType(scoreType === 'eagle' ? null : 'eagle')}
           >
             Eagle ×{wolfSettings.eagleMultiplier || 3}
           </button>
@@ -7369,16 +7710,23 @@ function formatMoney(value) {
 
       <div className="form-section">
         <h2>Result</h2>
+        <p className="viewer-note">
+          {wolfResult == null && derivedWolfOutcome
+            ? 'Auto from the scores — tap to override.'
+            : wolfResult == null
+              ? 'Enter every score to work this out, or tap to set it.'
+              : 'Overridden — tap the matching option again to go back to auto.'}
+        </p>
 
         <div className="result-grid">
           <button
             type="button"
             className={
-              wolfResult === 'win'
+              effectiveWolfResult === 'win'
                 ? 'choice-button active'
                 : 'choice-button'
             }
-            onClick={() => setWolfResult('win')}
+            onClick={() => setWolfResult(wolfResult === 'win' ? null : 'win')}
           >
             Wolf Win
           </button>
@@ -7386,11 +7734,11 @@ function formatMoney(value) {
           <button
             type="button"
             className={
-              wolfResult === 'tie'
+              effectiveWolfResult === 'tie'
                 ? 'choice-button active'
                 : 'choice-button'
             }
-            onClick={() => setWolfResult('tie')}
+            onClick={() => setWolfResult(wolfResult === 'tie' ? null : 'tie')}
           >
             Tie
           </button>
@@ -7398,11 +7746,11 @@ function formatMoney(value) {
           <button
             type="button"
             className={
-              wolfResult === 'loss'
+              effectiveWolfResult === 'loss'
                 ? 'choice-button active'
                 : 'choice-button'
             }
-            onClick={() => setWolfResult('loss')}
+            onClick={() => setWolfResult(wolfResult === 'loss' ? null : 'loss')}
           >
             Wolf Loss
           </button>
@@ -7436,15 +7784,21 @@ function formatMoney(value) {
         </div>
       </div>
 
+      <p className="viewer-note">
+        {skinsWinnerId == null
+          ? 'Auto from the scores — lowest score wins. Tap to override.'
+          : 'Overridden — tap the highlighted option again to go back to auto.'}
+      </p>
+
       <div className="skins-choice-grid">
         <button
           type="button"
           className={
-            skinsWinnerId === ''
+            effectiveSkinsWinnerId === ''
               ? 'choice-button active'
               : 'choice-button'
           }
-          onClick={() => setSkinsWinnerId('')}
+          onClick={() => setSkinsWinnerId(skinsWinnerId === '' ? null : '')}
         >
           Tie
         </button>
@@ -7454,8 +7808,8 @@ function formatMoney(value) {
               <button
                 key={team.id}
                 type="button"
-                className={skinsWinnerId === team.id ? 'choice-button active' : 'choice-button'}
-                onClick={() => setSkinsWinnerId(team.id)}
+                className={effectiveSkinsWinnerId === team.id ? 'choice-button active' : 'choice-button'}
+                onClick={() => setSkinsWinnerId(skinsWinnerId === team.id ? null : team.id)}
               >
                 {team.label}
               </button>
@@ -7464,8 +7818,8 @@ function formatMoney(value) {
               <button
                 key={player.id}
                 type="button"
-                className={skinsWinnerId === player.id ? 'choice-button active' : 'choice-button'}
-                onClick={() => setSkinsWinnerId(player.id)}
+                className={effectiveSkinsWinnerId === player.id ? 'choice-button active' : 'choice-button'}
+                onClick={() => setSkinsWinnerId(skinsWinnerId === player.id ? null : player.id)}
               >
                 {player.name}
               </button>
@@ -7502,8 +7856,12 @@ function formatMoney(value) {
       </div>
 
       {activeRound.players.map(player => {
-        const selection =
-          pokerSelections[player.id] || makeEmptyPokerSelection()
+        // Nett birdie/eagle/albatross come from this player's score vs par;
+        // the putt / chip-in / wipe toggles stay manual.
+        const selection = {
+          ...(pokerSelections[player.id] || makeEmptyPokerSelection()),
+          ...nettPokerFlagsFromScore(holeScores[player.id], holeParValue)
+        }
 
         const pokerHoleTotal = calculatePokerSelection(selection)
 
@@ -7522,8 +7880,8 @@ function formatMoney(value) {
 
               <button
                 type="button"
+                disabled
                 className={selection.nettBirdie ? 'choice-button active' : 'choice-button'}
-                onClick={() => updatePokerSelection(player.id, 'nettBirdie')}
               >
                 Nett Birdie
               </button>
@@ -7538,16 +7896,16 @@ function formatMoney(value) {
 
               <button
                 type="button"
+                disabled
                 className={selection.nettEagle ? 'choice-button active' : 'choice-button'}
-                onClick={() => updatePokerSelection(player.id, 'nettEagle')}
               >
                 Nett Eagle
               </button>
 
               <button
                 type="button"
+                disabled
                 className={selection.nettAlbatross ? 'choice-button active' : 'choice-button'}
-                onClick={() => updatePokerSelection(player.id, 'nettAlbatross')}
               >
                 Nett Albatross
               </button>
@@ -7579,6 +7937,7 @@ function formatMoney(value) {
 
             <p className="viewer-note">
               This hole: {pokerHoleTotal.cards} cards · {pokerHoleTotal.fines} fines
+              {' · nett birdie/eagle/albatross set from the score'}
             </p>
           </div>
         )
