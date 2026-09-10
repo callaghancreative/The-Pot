@@ -900,16 +900,18 @@ function deriveSkinsWinnerId({ players, mode, teams, scoreByPlayerId }) {
   return winners.length === 1 ? winners[0].id : ''
 }
 
-// Nett birdie / eagle / albatross pickups implied by a single score vs par.
+// Poker flags implied by a single nett score vs par: birdie / eagle /
+// albatross pickups, and a wipe for a nett double bogey or worse.
 function nettPokerFlagsFromScore(value, par) {
   const score = parseHoleScore(value)
   if (score == null || !par) {
-    return { nettBirdie: false, nettEagle: false, nettAlbatross: false }
+    return { nettBirdie: false, nettEagle: false, nettAlbatross: false, wipe: false }
   }
   return {
     nettBirdie: score === par - 1,
     nettEagle: score === par - 2,
-    nettAlbatross: score <= par - 3
+    nettAlbatross: score <= par - 3,
+    wipe: score >= par + 2
   }
 }
 
@@ -2530,6 +2532,7 @@ function App() {
         selection.nettBirdie = score === par - 1
         selection.nettEagle = score === par - 2
         selection.nettAlbatross = score <= par - 3
+        selection.wipe = score >= par + 2
       }
 
       const { cards, fines, achievements } = calculatePokerSelection(selection)
@@ -3801,9 +3804,9 @@ function App() {
       let deckPosition = cardsAlreadyDealt
 
       const pokerRows = activeRound.players.map(player => {
-        // Manual toggles (1-putt / chip-in / 3-putt / 4-putt / wipe) as the
-        // scorer set them, with the nett birdie·eagle·albatross pickups
-        // filled in automatically from this player's score against par.
+        // Manual toggles (1-putt / chip-in / 3-putt / 4-putt) as the scorer
+        // set them, with the nett birdie·eagle·albatross pickups and a wipe
+        // (nett double bogey or worse) filled in from the score against par.
         const selection = {
           ...(pokerSelections[player.id] || makeEmptyPokerSelection()),
           ...nettPokerFlagsFromScore(scoreByPlayerId[player.id], par)
@@ -7650,8 +7653,9 @@ function formatMoney(value) {
       </div>
 
       {activeRound.players.map(player => {
-        // Nett birdie/eagle/albatross come from this player's score vs par;
-        // the putt / chip-in / wipe toggles stay manual.
+        // Nett birdie/eagle/albatross pickups and a wipe (nett double bogey
+        // or worse) come from this player's score vs par; the putt and
+        // chip-in toggles stay manual.
         const selection = {
           ...(pokerSelections[player.id] || makeEmptyPokerSelection()),
           ...nettPokerFlagsFromScore(holeScores[player.id], holeParValue)
@@ -7695,19 +7699,13 @@ function formatMoney(value) {
               >
                 4-Putt
               </button>
-
-              <button
-                type="button"
-                className={selection.wipe ? 'choice-button active' : 'choice-button'}
-                onClick={() => updatePokerSelection(player.id, 'wipe')}
-              >
-                Wipe
-              </button>
             </div>
 
             <p className="viewer-note">
-              This hole: {pokerHoleTotal.cards} cards · {pokerHoleTotal.fines} fines.
-              Nett birdie, eagle and albatross are counted automatically from the score.
+              This hole: {pokerHoleTotal.cards} cards · {pokerHoleTotal.fines} fines
+              {selection.wipe ? ' · wipe' : ''}.
+              Nett birdie / eagle / albatross and a wipe (nett double bogey or worse)
+              are counted automatically from the score.
             </p>
           </div>
         )
