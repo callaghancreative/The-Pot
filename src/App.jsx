@@ -1034,23 +1034,20 @@ function App() {
   const [activeRound, setActiveRound] = useState(null)
   const [wolfResults, setWolfResults] = useState([])
 
-  // Single-group scoring: the gross score the scorer is entering per player for
-  // the current hole, plus that hole's par. The side-game controls below are
-  // derived from these unless the scorer taps a control to override it — an
-  // override is stored as a non-null value, `null` means "use the derived one".
+  // Single-group scoring: the nett score the scorer is entering per player for
+  // the current hole, plus that hole's par. Wolf result, winning-score type
+  // and the Skins winner are derived from these on save — there are no manual
+  // overrides.
   const [holeScores, setHoleScores] = useState({})
   const [holePar, setHolePar] = useState(4)
 
   const [wolfPlayerId, setWolfPlayerId] = useState('')
   const [partnerPlayerId, setPartnerPlayerId] = useState('')
-  const [wolfResult, setWolfResult] = useState(null)
-  const [scoreType, setScoreType] = useState(null)
 
   const [viewerWolfResults, setViewerWolfResults] = useState([])
   const [viewerSkinsResults, setViewerSkinsResults] = useState([])
 
   const [skinsResults, setSkinsResults] = useState([])
-  const [skinsWinnerId, setSkinsWinnerId] = useState(null)
   const [pokerResults, setPokerResults] = useState([])
   const [pokerSelections, setPokerSelections] = useState({})
   const [viewerPokerResults, setViewerPokerResults] = useState([])
@@ -3510,15 +3507,13 @@ function App() {
     return { scores, par: par ? Number(par) : 4 }
   }
 
-  // Reset the current-hole inputs back to "derive everything from scores".
+  // Reset the current-hole inputs. Everything but the scores, par, Wolf
+  // partner and the manual poker toggles is derived on save.
   function resetHoleInputs(players, savedRows, hole) {
     const { scores, par } = readRoundHole(savedRows, hole)
     setHoleScores(scores)
     setHolePar(par)
     setPartnerPlayerId('')
-    setWolfResult(null)
-    setScoreType(null)
-    setSkinsWinnerId(null)
     setPokerSelections(makePokerSelections(players || []))
   }
 
@@ -3545,9 +3540,6 @@ function App() {
 
     setWolfPlayerId('')
     setPartnerPlayerId('')
-    setWolfResult(null)
-    setScoreType(null)
-    setSkinsWinnerId(null)
     setPokerSelections({})
     setHoleScores({})
     setHolePar(4)
@@ -3605,10 +3597,10 @@ function App() {
 
     /*
       -------------------------
-      GROSS SCORES + DERIVED OUTCOMES
-      A blank field counts as par. Everything below (Wolf result / score
-      type, Skins winner, poker nett birdie·eagle·albatross) is derived from
-      these unless the scorer overrode a control (non-null state value).
+      NETT SCORES + DERIVED OUTCOMES
+      A blank field counts as par. Wolf result / winning-score type, the
+      Skins winner and the poker nett birdie·eagle·albatross pickups are all
+      derived from these scores — there are no manual overrides.
       -------------------------
     */
 
@@ -3647,9 +3639,9 @@ function App() {
       scoreByPlayerId
     })
 
-    const effectiveWolfResult = wolfResult ?? derivedWolf?.result ?? 'tie'
-    const effectiveScoreType = scoreType ?? derivedWolf?.scoreType ?? 'normal'
-    const effectiveSkinsWinnerId = skinsWinnerId ?? derivedSkinsWinnerId ?? ''
+    const effectiveWolfResult = derivedWolf?.result ?? 'tie'
+    const effectiveScoreType = derivedWolf?.scoreType ?? 'normal'
+    const effectiveSkinsWinnerId = derivedSkinsWinnerId ?? ''
 
     const savedScoreRows = activeRound.players.map(player => ({
       round_id: activeRound.id,
@@ -4036,10 +4028,6 @@ function App() {
       .filter(result => Number(result.hole) === Number(undoHole))
       .at(-1)
 
-    const previousSkinsResult = skinsResults
-      .filter(result => Number(result.hole) === Number(undoHole))
-      .at(-1)
-
     const previousPokerResults = pokerResults.filter(
       result => Number(result.hole) === Number(undoHole)
     )
@@ -4134,18 +4122,11 @@ function App() {
         previousWolfResult?.partner_player_id || ''
       )
 
-      // Pre-fill the hole's saved gross scores so the scorer can adjust and
-      // re-lock; keep the previously locked side-game outcomes as overrides.
+      // Pre-fill the hole's saved nett scores so the scorer can adjust and
+      // re-lock; the side-game outcomes re-derive from those scores on save.
       const undoneHole = readRoundHole(activeRound.scores, undoHole)
       setHoleScores(undoneHole.scores)
       setHolePar(undoneHole.par)
-      setWolfResult(previousWolfResult?.result ?? null)
-      setScoreType(previousWolfResult?.score_type ?? null)
-      setSkinsWinnerId(
-        previousSkinsResult?.winner_team ??
-        previousSkinsResult?.winner_player_id ??
-        null
-      )
 
       const restoredPokerSelections =
         makePokerSelections(activeRound.players)
@@ -7344,54 +7325,16 @@ function formatMoney(value) {
     game => game.game_type === 'poker'
   )
 
-  // Side-game outcomes derived from the gross scores the scorer is entering
-  // for this hole. `wolfResult` / `scoreType` / `skinsWinnerId` are null until
-  // the scorer taps a control to override; effective values fall back to the
-  // derived ones.
+  // Wolf result, winning-score type and the Skins winner are all worked out
+  // from the nett scores on save — nothing to preview here.
   const holeParValue = Number(holePar) || 4
 
-  const roundScoreByPlayerId = {}
-  activeRound.players.forEach(player => {
-    const raw = holeScores[player.id]
-    roundScoreByPlayerId[player.id] =
-      raw === '' || raw == null ? '' : Number(raw)
-  })
-
-  const allHoleScoresEntered = activeRound.players.every(
-    player => parseHoleScore(holeScores[player.id]) != null
-  )
-
-  const derivedWolfOutcome = hasWolf
-    ? deriveWolfOutcome({
-        players: activeRound.players,
-        wolfPlayerId,
-        partnerPlayerId,
-        scoreByPlayerId: roundScoreByPlayerId,
-        par: holeParValue
-      })
-    : null
-
-  const derivedSkinsWinnerId = hasSkins
-    ? deriveSkinsWinnerId({
-        players: activeRound.players,
-        mode: getSkinsSettings(activeRound).mode,
-        teams: getSkinsTeams(activeRound),
-        scoreByPlayerId: roundScoreByPlayerId
-      })
-    : ''
-
-  const effectiveWolfResult = wolfResult ?? derivedWolfOutcome?.result ?? null
-  const effectiveScoreType = scoreType ?? derivedWolfOutcome?.scoreType ?? 'normal'
-  const effectiveSkinsWinnerId =
-    skinsWinnerId ?? (allHoleScoresEntered ? derivedSkinsWinnerId : null)
+  const skinsCarryoversOn = hasSkins
+    ? Boolean(getSkinsSettings(activeRound).carryovers)
+    : false
 
   const totals = hasWolf
     ? calculateWolfPoints(activeRound, wolfResults)
-    : {}
-
-  const wolfSettings = hasWolf
-    ? activeRound.games.find(game => game.game_type === 'wolf')
-        ?.settings || {}
     : {}
 
   const currentSkinValue = hasSkins
@@ -7526,7 +7469,7 @@ function formatMoney(value) {
         </button>
 
         {!finished && (
-          <div className="form-card">
+          <div className="form-card round-hole-card">
 
   {/* HOLE SCORES — side games are derived from these */}
   <div className="form-section">
@@ -7560,7 +7503,7 @@ function formatMoney(value) {
               <strong>{player.name}</strong>
               <span>
                 {relative == null
-                  ? 'Gross score'
+                  ? 'Nett score'
                   : relative === 0
                     ? 'Par'
                     : relative < 0
@@ -7599,8 +7542,9 @@ function formatMoney(value) {
     </div>
 
     <p className="viewer-note">
-      Wolf, Skins and 3-Putt Poker results are worked out from these scores. Leave a
-      field on par if it wasn&rsquo;t played out.
+      Enter each golfer&rsquo;s nett score. Wolf, Skins and 3-Putt Poker results are
+      worked out from these automatically &mdash; leave a field on par if it
+      wasn&rsquo;t played out.
     </p>
   </div>
 
@@ -7665,183 +7609,33 @@ function formatMoney(value) {
         </div>
       </div>
 
-      <div className="form-section">
-        <h2>Winning Score</h2>
-        <p className="viewer-note">Auto from the scores &mdash; tap to override.</p>
-
-        <div className="choice-grid">
-          <button
-            type="button"
-            className={
-              effectiveScoreType === 'normal'
-                ? 'choice-button active'
-                : 'choice-button'
-            }
-            onClick={() => setScoreType(scoreType === 'normal' ? null : 'normal')}
-          >
-            Normal
-          </button>
-
-          <button
-            type="button"
-            className={
-              effectiveScoreType === 'birdie'
-                ? 'choice-button active'
-                : 'choice-button'
-            }
-            onClick={() => setScoreType(scoreType === 'birdie' ? null : 'birdie')}
-          >
-            Birdie ×{wolfSettings.birdieMultiplier || 2}
-          </button>
-
-          <button
-            type="button"
-            className={
-              effectiveScoreType === 'eagle'
-                ? 'choice-button active'
-                : 'choice-button'
-            }
-            onClick={() => setScoreType(scoreType === 'eagle' ? null : 'eagle')}
-          >
-            Eagle ×{wolfSettings.eagleMultiplier || 3}
-          </button>
-        </div>
-      </div>
-
-      <div className="form-section">
-        <h2>Result</h2>
-        <p className="viewer-note">
-          {wolfResult == null && derivedWolfOutcome
-            ? 'Auto from the scores — tap to override.'
-            : wolfResult == null
-              ? 'Enter every score to work this out, or tap to set it.'
-              : 'Overridden — tap the matching option again to go back to auto.'}
-        </p>
-
-        <div className="result-grid">
-          <button
-            type="button"
-            className={
-              effectiveWolfResult === 'win'
-                ? 'choice-button active'
-                : 'choice-button'
-            }
-            onClick={() => setWolfResult(wolfResult === 'win' ? null : 'win')}
-          >
-            Wolf Win
-          </button>
-
-          <button
-            type="button"
-            className={
-              effectiveWolfResult === 'tie'
-                ? 'choice-button active'
-                : 'choice-button'
-            }
-            onClick={() => setWolfResult(wolfResult === 'tie' ? null : 'tie')}
-          >
-            Tie
-          </button>
-
-          <button
-            type="button"
-            className={
-              effectiveWolfResult === 'loss'
-                ? 'choice-button active'
-                : 'choice-button'
-            }
-            onClick={() => setWolfResult(wolfResult === 'loss' ? null : 'loss')}
-          >
-            Wolf Loss
-          </button>
-        </div>
-      </div>
+      <p className="viewer-note">
+        Wolf win / tie / loss and any birdie or eagle bonus are worked out from
+        the nett scores when you lock the hole.
+      </p>
     </>
   )}
 
   {/* SKINS */}
   {hasSkins && (
     <div className="game-scoring-block">
-      <div className="game-scoring-heading">
-        <div>
-          <p className="eyebrow">
-            SKINS
-          </p>
+      <p className="eyebrow">SKINS</p>
 
-          <h2>
-            Who won the hole?
-          </h2>
-        </div>
-
-        <div className="skin-value">
-          {currentSkinValue}
-
-          <span>
-            {currentSkinValue === 1
-              ? 'skin'
-              : 'skins'}
-          </span>
-        </div>
-      </div>
-
-      <p className="viewer-note">
-        {skinsWinnerId == null
-          ? 'Auto from the scores — lowest score wins. Tap to override.'
-          : 'Overridden — tap the highlighted option again to go back to auto.'}
+      <p className="skin-worth-line">
+        This hole is worth{' '}
+        <span className="skin-worth-value">
+          {currentSkinValue} {currentSkinValue === 1 ? 'skin' : 'skins'}
+        </span>
       </p>
 
-      <div className="skins-choice-grid">
-        <button
-          type="button"
-          className={
-            effectiveSkinsWinnerId === ''
-              ? 'choice-button active'
-              : 'choice-button'
-          }
-          onClick={() => setSkinsWinnerId(skinsWinnerId === '' ? null : '')}
-        >
-          Tie
-        </button>
-
-        {getSkinsSettings(activeRound).mode === 'team'
-          ? getSkinsTeams(activeRound).map(team => (
-              <button
-                key={team.id}
-                type="button"
-                className={effectiveSkinsWinnerId === team.id ? 'choice-button active' : 'choice-button'}
-                onClick={() => setSkinsWinnerId(skinsWinnerId === team.id ? null : team.id)}
-              >
-                {team.label}
-              </button>
-            ))
-          : activeRound.players.map(player => (
-              <button
-                key={player.id}
-                type="button"
-                className={effectiveSkinsWinnerId === player.id ? 'choice-button active' : 'choice-button'}
-                onClick={() => setSkinsWinnerId(skinsWinnerId === player.id ? null : player.id)}
-              >
-                {player.name}
-              </button>
-            ))}
-      </div>
-
-      <div className="skins-mini-scoreboard">
-        {activeRound.players.map(player => (
-          <div
-            key={player.id}
-            className="skins-mini-row"
-          >
-            <span>
-              {player.name}
-            </span>
-
-            <strong>
-              {skinsTotals[player.id] || 0}
-            </strong>
-          </div>
-        ))}
-      </div>
+      <p className="viewer-note">
+        Lowest nett score wins the hole automatically.{' '}
+        {skinsCarryoversOn
+          ? currentSkinValue > 1
+            ? 'Carryovers are on — earlier tied holes have rolled into this one.'
+            : 'Carryovers are on — a tied hole rolls its skin into the next.'
+          : 'One skin per hole, no carryovers.'}
+      </p>
     </div>
   )}
 
@@ -7880,34 +7674,10 @@ function formatMoney(value) {
 
               <button
                 type="button"
-                disabled
-                className={selection.nettBirdie ? 'choice-button active' : 'choice-button'}
-              >
-                Nett Birdie
-              </button>
-
-              <button
-                type="button"
                 className={selection.chipIn ? 'choice-button active' : 'choice-button'}
                 onClick={() => updatePokerSelection(player.id, 'chipIn')}
               >
                 Chip-In
-              </button>
-
-              <button
-                type="button"
-                disabled
-                className={selection.nettEagle ? 'choice-button active' : 'choice-button'}
-              >
-                Nett Eagle
-              </button>
-
-              <button
-                type="button"
-                disabled
-                className={selection.nettAlbatross ? 'choice-button active' : 'choice-button'}
-              >
-                Nett Albatross
               </button>
 
               <button
@@ -7936,8 +7706,8 @@ function formatMoney(value) {
             </div>
 
             <p className="viewer-note">
-              This hole: {pokerHoleTotal.cards} cards · {pokerHoleTotal.fines} fines
-              {' · nett birdie/eagle/albatross set from the score'}
+              This hole: {pokerHoleTotal.cards} cards · {pokerHoleTotal.fines} fines.
+              Nett birdie, eagle and albatross are counted automatically from the score.
             </p>
           </div>
         )
