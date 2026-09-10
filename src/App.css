@@ -2508,6 +2508,14 @@ button:disabled {
   margin: 10px 0 14px;
 }
 
+/* Shortcut back to the scorer's own hole entry, shown when the
+   scorer opens the live table from the scoring screen. */
+.event-return-to-scoring {
+  display: block;
+  width: 100%;
+  margin: 4px 0 6px;
+}
+
 .event-score-topbar h1,
 .event-live-header h1 {
   margin: 4px 0 0;
@@ -2571,8 +2579,10 @@ button:disabled {
 }
 
 .event-par-button.active {
-  background: var(--gold);
-  color: var(--forest);
+  /* !important beats the app-wide `button:not(...)` fallback block. */
+  background: var(--gold) !important;
+  border-color: var(--gold) !important;
+  color: var(--forest) !important;
 }
 
 .event-par-button:disabled {
@@ -2628,12 +2638,14 @@ button:disabled {
   width: 42px;
   height: 42px;
   padding: 0;
-  border: 1.5px solid var(--gold);
-  border-radius: 999px;
-  background: transparent;
+  /* Bare gold glyphs, no pill outline. !important beats the
+     app-wide `button:not(...)` fallback block. */
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
   color: var(--gold);
   font: inherit;
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   font-weight: 800;
   line-height: 1;
 }
@@ -2852,6 +2864,11 @@ button:disabled {
 
 .event-games-heading h3 {
   margin-bottom: 4px;
+}
+
+.event-games-heading .viewer-note {
+  margin-top: 0;
+  text-align: left;
 }
 
 .event-game-toggle-grid {

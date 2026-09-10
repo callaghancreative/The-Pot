@@ -5595,9 +5595,9 @@ function formatMoney(value) {
             <div className="event-par-row">
               <div>
                 <span className="field-label">Par</span>
-                <p className="viewer-note">
-                  {existingPar ? 'Already set for this hole.' : 'Par 4 by default. Change it only if needed.'}
-                </p>
+                {existingPar && (
+                  <p className="viewer-note">Already set for this hole.</p>
+                )}
               </div>
 
               <div className="event-par-selector">
@@ -5954,6 +5954,17 @@ function formatMoney(value) {
           </button>
 
           <img src="/brand/the-pot-logo.png" alt="THE POT" className="brand-logo small-logo" />
+
+          {joinedEventGroup && (
+            <button
+              type="button"
+              className="primary-button event-return-to-scoring"
+              onClick={openEventScoring}
+              disabled={eventScoreLoading}
+            >
+              ← Return to Scoring
+            </button>
+          )}
 
           <div className="event-live-header">
             <div>
