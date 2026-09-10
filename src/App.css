@@ -3519,3 +3519,31 @@ button:disabled {
   background: var(--gold);
   color: var(--forest);
 }
+
+/* =========================================================
+   Uniform button radius
+   Text / word buttons share the input-field radius (14px) so
+   cards, inputs and buttons all read as one family. Single
+   digit and +/- glyph buttons (player count, par, score
+   steppers) deliberately stay circular and are not listed here.
+   ========================================================= */
+.primary-button,
+.secondary-button,
+.choice-button,
+.event-form .choice-button,
+.event-create-card .choice-button,
+.tournament-card .choice-button,
+.segmented--labels .segment,
+.event-game-toggle,
+.event-mini-choice,
+.event-poker-button,
+.create-button,
+.group-save-button,
+.group-use-button,
+.add-golfer-row .add-golfer-button,
+.event-score-basis button,
+.score-basis-selector button,
+.tournament-score-basis button,
+.event-score-live-link {
+  border-radius: 14px !important;
+}
