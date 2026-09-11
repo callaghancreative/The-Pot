@@ -732,12 +732,17 @@ select option {
 
 .skin-worth-value {
   color: var(--gold);
-  font-weight: 800;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
 }
 
 /* Team Matchplay: winning team in white, the score in the same gold
    heading font used for the 3-Putt Poker cards/fines line. */
 .matchplay-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   margin: 4px 0 0;
   font-size: 15px;
 }

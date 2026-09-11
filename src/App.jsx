@@ -7985,7 +7985,7 @@ function formatMoney(value) {
 
       <p className="matchplay-line">
         {matchplaySummary.teamLabel && (
-          <span className="matchplay-team">{matchplaySummary.teamLabel} </span>
+          <span className="matchplay-team">{matchplaySummary.teamLabel}</span>
         )}
         <span className="matchplay-score">{matchplaySummary.statusText}</span>
       </p>
