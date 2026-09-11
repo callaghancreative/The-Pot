@@ -121,6 +121,9 @@ function nextMatchplayState(priorRow, holeWinner, matchplayRowCount) {
 }
 
 // Turn the persisted rows into a headline + detail line for display.
+// `teamLabel` (the team currently winning lunch, or '' when all square /
+// not started) and `statusText` (the score itself) are rendered in different
+// styles — team name in white, score in the gold heading font.
 function summariseMatchplay(round, results) {
   const teams = getMatchplayTeams(round)
   if (teams.length !== 2) return null
@@ -136,10 +139,7 @@ function summariseMatchplay(round, results) {
   const roundComplete = round.status === 'completed' || round.holeIndex >= 18
 
   if (!latest) {
-    return {
-      headline: 'All square',
-      detail: 'Best-ball team score each hole decides who buys lunch.'
-    }
+    return { teamLabel: '', statusText: 'All square' }
   }
 
   if (latest.decided) {
@@ -149,34 +149,30 @@ function summariseMatchplay(round, results) {
         ? `${latest.lead_amount}&${closingHolesLeft}`
         : `${latest.lead_amount} up`
     return {
-      headline: `${label(latest.lead_team)} win lunch`,
-      detail: `Closed out ${margin} — match over.`,
+      teamLabel: label(latest.lead_team),
+      statusText: `Win lunch · ${margin}`,
       winnerTeam: latest.lead_team
     }
   }
 
   if (roundComplete) {
     if (!latest.lead_team || latest.lead_amount === 0) {
-      return {
-        headline: 'Match halved',
-        detail: 'All square after 18 — split lunch.'
-      }
+      return { teamLabel: '', statusText: 'Match halved — split lunch' }
     }
     return {
-      headline: `${label(latest.lead_team)} win lunch`,
-      detail: `Won ${latest.lead_amount} up after 18.`,
+      teamLabel: label(latest.lead_team),
+      statusText: `Win lunch · ${latest.lead_amount} up`,
       winnerTeam: latest.lead_team
     }
   }
 
-  const headline =
-    !latest.lead_team || latest.lead_amount === 0
-      ? 'All square'
-      : `${label(latest.lead_team)} ${latest.lead_amount} up`
+  if (!latest.lead_team || latest.lead_amount === 0) {
+    return { teamLabel: '', statusText: 'All square' }
+  }
 
   return {
-    headline,
-    detail: `Through ${holesPlayed} — lowest team score each hole wins it.`
+    teamLabel: label(latest.lead_team),
+    statusText: `${latest.lead_amount} up`
   }
 }
 
@@ -7371,8 +7367,8 @@ function formatMoney(value) {
 
             <div className="scoreboard-card">
               <div className="score-row">
-                <span>{viewerMatchplaySummary.headline}</span>
-                <strong>{viewerMatchplaySummary.detail}</strong>
+                <span>{viewerMatchplaySummary.teamLabel}</span>
+                <strong>{viewerMatchplaySummary.statusText}</strong>
               </div>
             </div>
           </>
@@ -7987,11 +7983,12 @@ function formatMoney(value) {
     <div className="game-scoring-block">
       <p className="eyebrow">TEAM MATCHPLAY · LUNCH</p>
 
-      <p className="skin-worth-line">
-        <span className="skin-worth-value">{matchplaySummary.headline}</span>
+      <p className="matchplay-line">
+        {matchplaySummary.teamLabel && (
+          <span className="matchplay-team">{matchplaySummary.teamLabel} </span>
+        )}
+        <span className="matchplay-score">{matchplaySummary.statusText}</span>
       </p>
-
-      <p className="viewer-note">{matchplaySummary.detail}</p>
     </div>
   )}
 
@@ -8141,8 +8138,8 @@ function formatMoney(value) {
 
             <div className="scoreboard-card">
               <div className="score-row">
-                <span>{matchplaySummary.headline}</span>
-                <strong>{matchplaySummary.detail}</strong>
+                <span>{matchplaySummary.teamLabel}</span>
+                <strong>{matchplaySummary.statusText}</strong>
               </div>
             </div>
           </>

@@ -735,6 +735,25 @@ select option {
   font-weight: 800;
 }
 
+/* Team Matchplay: winning team in white, the score in the same gold
+   heading font used for the 3-Putt Poker cards/fines line. */
+.matchplay-line {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+
+.matchplay-team {
+  color: var(--cream);
+  font-weight: 700;
+}
+
+.matchplay-score {
+  color: var(--gold);
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+}
+
 .game-scoring-block {
   margin-top: 28px;
   padding-top: 28px;
