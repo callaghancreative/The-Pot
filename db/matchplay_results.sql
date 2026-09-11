@@ -4,6 +4,16 @@
 -- + the team pairing stored on the round's `matchplay` round_games row.
 -- Run this in the Supabase SQL editor before deploying.
 
+-- 1. Allow the new 'matchplay' game type on round_games. Its game_type is
+--    restricted by a CHECK constraint that must be widened.
+alter table public.round_games
+  drop constraint if exists round_games_game_type_check;
+
+alter table public.round_games
+  add constraint round_games_game_type_check
+  check (game_type in ('wolf', 'skins', 'poker', 'matchplay'));
+
+-- 2. Per-hole matchplay state.
 create table if not exists public.matchplay_results (
   id             uuid primary key default gen_random_uuid(),
   round_id       uuid not null references public.rounds(id) on delete cascade,
