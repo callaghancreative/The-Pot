@@ -38,22 +38,146 @@ function getSkinsSettings(round) {
   )
 }
 
-function getSkinsTeams(round) {
-  const settings = getSkinsSettings(round)
-  if (settings.mode !== 'team') return []
-
-  const teamOneOrders = settings.teamOneOrders || [1, 2]
-  const teamTwoOrders = settings.teamTwoOrders || [3, 4]
-
+function buildTeamsFromOrders(round, teamOneOrders, teamTwoOrders) {
   const makeTeam = (id, orders) => {
-    const players = orders
+    const players = (orders || [])
       .map(order => round.players.find(player => Number(player.player_order) === Number(order)))
       .filter(Boolean)
 
     return { id, players, label: players.map(player => player.name).join(' + ') }
   }
 
-  return [makeTeam('team1', teamOneOrders), makeTeam('team2', teamTwoOrders)]
+  return [
+    makeTeam('team1', teamOneOrders || [1, 2]),
+    makeTeam('team2', teamTwoOrders || [3, 4])
+  ]
+}
+
+function getSkinsTeams(round) {
+  const settings = getSkinsSettings(round)
+  if (settings.mode !== 'team') return []
+
+  return buildTeamsFromOrders(round, settings.teamOneOrders, settings.teamTwoOrders)
+}
+
+function getMatchplaySettings(round) {
+  return (
+    round.games.find(game => game.game_type === 'matchplay')?.settings || {}
+  )
+}
+
+function getMatchplayTeams(round) {
+  if (!round.games.some(game => game.game_type === 'matchplay')) return []
+
+  const settings = getMatchplaySettings(round)
+  return buildTeamsFromOrders(round, settings.teamOneOrders, settings.teamTwoOrders)
+}
+
+// Best-ball team matchplay for one hole from the nett scores.
+function deriveMatchplayHole(teams, scoreByPlayerId) {
+  if (!teams || teams.length !== 2) return null
+
+  const teamBest = team => {
+    const scores = team.players
+      .map(player => parseHoleScore(scoreByPlayerId[player.id]))
+      .filter(value => value != null)
+    return scores.length ? Math.min(...scores) : null
+  }
+
+  const teamOneScore = teamBest(teams[0])
+  const teamTwoScore = teamBest(teams[1])
+  if (teamOneScore == null || teamTwoScore == null) return null
+
+  const holeWinner =
+    teamOneScore < teamTwoScore
+      ? 'team1'
+      : teamTwoScore < teamOneScore
+        ? 'team2'
+        : 'halved'
+
+  return { holeWinner, teamOneScore, teamTwoScore }
+}
+
+// Signed lead: positive = team1 ahead, negative = team2 ahead.
+function signedMatchplayLead(row) {
+  if (!row || !row.lead_team) return 0
+  return row.lead_team === 'team1' ? row.lead_amount : -row.lead_amount
+}
+
+// Roll a hole outcome into the running match state.
+function nextMatchplayState(priorRow, holeWinner, matchplayRowCount) {
+  const prev = signedMatchplayLead(priorRow)
+  const delta = holeWinner === 'team1' ? 1 : holeWinner === 'team2' ? -1 : 0
+  const signed = prev + delta
+
+  const leadAmount = Math.abs(signed)
+  const leadTeam = signed > 0 ? 'team1' : signed < 0 ? 'team2' : null
+
+  const holesPlayed = matchplayRowCount + 1
+  const holesRemaining = 18 - holesPlayed
+  const decided = holesRemaining >= 0 && leadAmount > holesRemaining
+
+  return { leadTeam, leadAmount, decided, holesPlayed, holesRemaining }
+}
+
+// Turn the persisted rows into a headline + detail line for display.
+function summariseMatchplay(round, results) {
+  const teams = getMatchplayTeams(round)
+  if (teams.length !== 2) return null
+
+  const label = teamId =>
+    teamId === 'team1' ? teams[0].label : teams[1].label
+
+  const sorted = [...(results || [])].sort(
+    (a, b) => Number(a.hole) - Number(b.hole)
+  )
+  const latest = sorted.at(-1) || null
+  const holesPlayed = sorted.length
+  const roundComplete = round.status === 'completed' || round.holeIndex >= 18
+
+  if (!latest) {
+    return {
+      headline: 'All square',
+      detail: 'Best-ball team score each hole decides who buys lunch.'
+    }
+  }
+
+  if (latest.decided) {
+    const closingHolesLeft = 18 - holesPlayed
+    const margin =
+      closingHolesLeft > 0
+        ? `${latest.lead_amount}&${closingHolesLeft}`
+        : `${latest.lead_amount} up`
+    return {
+      headline: `${label(latest.lead_team)} win lunch`,
+      detail: `Closed out ${margin} — match over.`,
+      winnerTeam: latest.lead_team
+    }
+  }
+
+  if (roundComplete) {
+    if (!latest.lead_team || latest.lead_amount === 0) {
+      return {
+        headline: 'Match halved',
+        detail: 'All square after 18 — split lunch.'
+      }
+    }
+    return {
+      headline: `${label(latest.lead_team)} win lunch`,
+      detail: `Won ${latest.lead_amount} up after 18.`,
+      winnerTeam: latest.lead_team
+    }
+  }
+
+  const headline =
+    !latest.lead_team || latest.lead_amount === 0
+      ? 'All square'
+      : `${label(latest.lead_team)} ${latest.lead_amount} up`
+
+  return {
+    headline,
+    detail: `Through ${holesPlayed} — lowest team score each hole wins it.`
+  }
 }
 
 function getCurrentSkinsValue(round, results) {
@@ -950,6 +1074,8 @@ function App() {
   const [wolfEnabled, setWolfEnabled] = useState(true)
   const [skinsEnabled, setSkinsEnabled] = useState(false)
   const [pokerEnabled, setPokerEnabled] = useState(false)
+  const [matchplayEnabled, setMatchplayEnabled] = useState(false)
+  const [matchplayTeamPairing, setMatchplayTeamPairing] = useState('12v34')
 
   const [wolfDollarPoint, setWolfDollarPoint] = useState(1)
   const [birdieMultiplier, setBirdieMultiplier] = useState(2)
@@ -1053,6 +1179,9 @@ function App() {
   const [pokerResults, setPokerResults] = useState([])
   const [pokerSelections, setPokerSelections] = useState({})
   const [viewerPokerResults, setViewerPokerResults] = useState([])
+
+  const [matchplayResults, setMatchplayResults] = useState([])
+  const [viewerMatchplayResults, setViewerMatchplayResults] = useState([])
 
   function getSeasonPointScale(playerCount) {
     if (playerCount === 4) return [100, 70, 50, 30]
@@ -3085,7 +3214,8 @@ function App() {
           wolfResponse,
           skinsResponse,
           pokerResponse,
-          holeScoresResponse
+          holeScoresResponse,
+          matchplayResponse
         ] = await Promise.all([
           supabase
             .from('players')
@@ -3114,7 +3244,12 @@ function App() {
           supabase
             .from('round_hole_scores')
             .select('*')
+            .eq('round_id', round.id),
+          supabase
+            .from('matchplay_results')
+            .select('*')
             .eq('round_id', round.id)
+            .order('hole', { ascending: true })
         ])
 
         const firstError = [
@@ -3123,7 +3258,8 @@ function App() {
           wolfResponse.error,
           skinsResponse.error,
           pokerResponse.error,
-          holeScoresResponse.error
+          holeScoresResponse.error,
+          matchplayResponse.error
         ].find(Boolean)
 
         if (firstError) throw firstError
@@ -3157,6 +3293,7 @@ function App() {
         setWolfResults(wolfResponse.data || [])
         setSkinsResults(skinsResponse.data || [])
         setPokerResults(pokerResponse.data || [])
+        setMatchplayResults(matchplayResponse.data || [])
 
         if (round.status !== 'completed') {
           const scheduledWolf = getScheduledWolf(
@@ -3440,6 +3577,38 @@ function App() {
       }
     )
 
+    // Watch new Team Matchplay results.
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'matchplay_results',
+        filter: `round_id=eq.${roundId}`
+      },
+      payload => {
+        setViewerMatchplayResults(current => {
+          if (current.some(result => result.id === payload.new.id)) return current
+          return [...current, payload.new]
+        })
+      }
+    )
+
+    // Watch Matchplay results being removed by Undo Last Hole.
+    .on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'matchplay_results'
+      },
+      payload => {
+        setViewerMatchplayResults(current =>
+          current.filter(result => result.id !== payload.old.id)
+        )
+      }
+    )
+
     .subscribe()
 
   return () => {
@@ -3536,10 +3705,12 @@ function App() {
     setWolfResults([])
     setSkinsResults([])
     setPokerResults([])
+    setMatchplayResults([])
 
     setViewerWolfResults([])
     setViewerSkinsResults([])
     setViewerPokerResults([])
+    setViewerMatchplayResults([])
 
     setWolfPlayerId('')
     setPartnerPlayerId('')
@@ -3565,6 +3736,7 @@ function App() {
     setViewerWolfResults([])
     setViewerSkinsResults([])
     setViewerPokerResults([])
+    setViewerMatchplayResults([])
     setJoinCode('')
     setError('')
 
@@ -3596,6 +3768,10 @@ function App() {
 
     const hasPoker = activeRound.games.some(
       game => game.game_type === 'poker'
+    )
+
+    const hasMatchplay = activeRound.games.some(
+      game => game.game_type === 'matchplay'
     )
 
     /*
@@ -3858,6 +4034,55 @@ function App() {
     }
 
     /*
+      -------------------------
+      TEAM MATCHPLAY (deciding lunch)
+      Best-ball team score per hole. Rows stop once the match is closed
+      out; the money pot / season are not affected.
+      -------------------------
+    */
+
+    let newMatchplayResult = null
+
+    if (hasMatchplay && !matchplayResults.some(row => row.decided)) {
+      const teams = getMatchplayTeams(activeRound)
+      const holeOutcome = deriveMatchplayHole(teams, scoreByPlayerId)
+
+      if (holeOutcome) {
+        const priorRow = [...matchplayResults]
+          .sort((a, b) => Number(a.hole) - Number(b.hole))
+          .at(-1)
+
+        const state = nextMatchplayState(
+          priorRow,
+          holeOutcome.holeWinner,
+          matchplayResults.length
+        )
+
+        const { data: matchplayRow, error: matchplayError } = await supabase
+          .from('matchplay_results')
+          .upsert(
+            {
+              round_id: activeRound.id,
+              hole: currentHole,
+              hole_winner: holeOutcome.holeWinner,
+              team_one_score: holeOutcome.teamOneScore,
+              team_two_score: holeOutcome.teamTwoScore,
+              lead_team: state.leadTeam,
+              lead_amount: state.leadAmount,
+              decided: state.decided
+            },
+            { onConflict: 'round_id,hole' }
+          )
+          .select()
+          .single()
+
+        if (matchplayError) throw matchplayError
+
+        newMatchplayResult = matchplayRow
+      }
+    }
+
+    /*
       Update local results
     */
 
@@ -3886,6 +4111,15 @@ function App() {
       setPokerResults(current => [
         ...current,
         ...newPokerResults
+      ])
+    }
+
+    if (newMatchplayResult) {
+      setMatchplayResults(current => [
+        ...current.filter(
+          row => Number(row.hole) !== Number(newMatchplayResult.hole)
+        ),
+        newMatchplayResult
       ])
     }
 
@@ -4010,7 +4244,7 @@ function App() {
     const undoHole = activeRound.holeSequence[undoIndex]
 
     const shouldUndo = window.confirm(
-      `Undo Hole ${undoHole}? Its Wolf, Skins and Poker results will be removed so you can score the hole again.`
+      `Undo Hole ${undoHole}? Its Wolf, Skins, Poker and Matchplay results will be removed so you can score the hole again.`
     )
 
     if (!shouldUndo) return
@@ -4025,6 +4259,10 @@ function App() {
 
     const hasPoker = activeRound.games.some(
       game => game.game_type === 'poker'
+    )
+
+    const hasMatchplay = activeRound.games.some(
+      game => game.game_type === 'matchplay'
     )
 
     const previousWolfResult = wolfResults
@@ -4069,6 +4307,16 @@ function App() {
         if (pokerDeleteError) throw pokerDeleteError
       }
 
+      if (hasMatchplay) {
+        const { error: matchplayDeleteError } = await supabase
+          .from('matchplay_results')
+          .delete()
+          .eq('round_id', activeRound.id)
+          .eq('hole', undoHole)
+
+        if (matchplayDeleteError) throw matchplayDeleteError
+      }
+
       const { error: roundUpdateError } = await supabase
         .from('rounds')
         .update({
@@ -4093,6 +4341,12 @@ function App() {
       )
 
       setPokerResults(current =>
+        current.filter(
+          result => Number(result.hole) !== Number(undoHole)
+        )
+      )
+
+      setMatchplayResults(current =>
         current.filter(
           result => Number(result.hole) !== Number(undoHole)
         )
@@ -4601,6 +4855,7 @@ function formatMoney(value) {
   setWolfResults([])
   setSkinsResults([])
   setPokerResults([])
+  setMatchplayResults([])
 
   setWolfPlayerId(scheduledWolf?.id || '')
   resetHoleInputs(round.players, [], sequence[0])
@@ -4621,7 +4876,7 @@ function formatMoney(value) {
       return
     }
 
-    if (!wolfEnabled && !skinsEnabled && !pokerEnabled) {
+    if (!wolfEnabled && !skinsEnabled && !pokerEnabled && !matchplayEnabled) {
       setError('Please select at least one game.')
       return
     }
@@ -4635,6 +4890,11 @@ function formatMoney(value) {
 
     if (skinsEnabled && skinsMode === 'team' && playerCount !== 4) {
       setError('Team Skins requires exactly 4 players.')
+      return
+    }
+
+    if (matchplayEnabled && playerCount !== 4) {
+      setError('Team Matchplay requires exactly 4 players.')
       return
     }
 
@@ -4711,6 +4971,27 @@ function formatMoney(value) {
           settings: {
             fineValue: Number(pokerFineValue),
             buyIn: Number(pokerBuyIn)
+          }
+        })
+      }
+
+      if (matchplayEnabled) {
+        // Reuse the Skins team pairing when Skins is in team mode, otherwise
+        // use Matchplay's own pairing selector.
+        const pairing =
+          skinsEnabled && skinsMode === 'team'
+            ? skinsTeamPairing
+            : matchplayTeamPairing
+
+        gameRows.push({
+          round_id: round.id,
+          game_type: 'matchplay',
+          settings: {
+            decides: 'lunch',
+            teamOneOrders:
+              pairing === '12v34' ? [1, 2] : pairing === '13v24' ? [1, 3] : [1, 4],
+            teamTwoOrders:
+              pairing === '12v34' ? [3, 4] : pairing === '13v24' ? [2, 4] : [2, 3]
           }
         })
       }
@@ -4861,9 +5142,14 @@ function formatMoney(value) {
       game => game.game_type === 'poker'
     )
 
+    const hasMatchplay = roundToOpen.games.some(
+      game => game.game_type === 'matchplay'
+    )
+
     let existingWolfResults = []
     let existingSkinsResults = []
     let existingPokerResults = []
+    let existingMatchplayResults = []
 
     if (hasWolf) {
       const { data, error: resultsError } = await supabase
@@ -4901,6 +5187,18 @@ function formatMoney(value) {
       existingPokerResults = data || []
     }
 
+    if (hasMatchplay) {
+      const { data, error: matchplayError } = await supabase
+        .from('matchplay_results')
+        .select('*')
+        .eq('round_id', roundToOpen.id)
+        .order('hole', { ascending: true })
+
+      if (matchplayError) throw matchplayError
+
+      existingMatchplayResults = data || []
+    }
+
     // Re-fetch the round in case the host has
     // already moved holes since this viewer joined.
     const { data: freshRound, error: roundError } =
@@ -4920,6 +5218,7 @@ function formatMoney(value) {
     setViewerWolfResults(existingWolfResults)
     setViewerSkinsResults(existingSkinsResults)
     setViewerPokerResults(existingPokerResults)
+    setViewerMatchplayResults(existingMatchplayResults)
 
     const viewerUrl = new URL(window.location.href)
     viewerUrl.searchParams.set('round', roundToOpen.round_code)
@@ -4953,7 +5252,8 @@ function formatMoney(value) {
         wolfResponse,
         skinsResponse,
         pokerResponse,
-        holeScoresResponse
+        holeScoresResponse,
+        matchplayResponse
       ] = await Promise.all([
         supabase
           .from('rounds')
@@ -4987,7 +5287,12 @@ function formatMoney(value) {
         supabase
           .from('round_hole_scores')
           .select('*')
+          .eq('round_id', activeRound.id),
+        supabase
+          .from('matchplay_results')
+          .select('*')
           .eq('round_id', activeRound.id)
+          .order('hole', { ascending: true })
       ])
 
       const firstError = [
@@ -4997,7 +5302,8 @@ function formatMoney(value) {
         wolfResponse.error,
         skinsResponse.error,
         pokerResponse.error,
-        holeScoresResponse.error
+        holeScoresResponse.error,
+        matchplayResponse.error
       ].find(Boolean)
 
       if (firstError) throw firstError
@@ -5040,6 +5346,7 @@ function formatMoney(value) {
       setWolfResults(wolfResponse.data || [])
       setSkinsResults(skinsResponse.data || [])
       setPokerResults(pokerResponse.data || [])
+      setMatchplayResults(matchplayResponse.data || [])
 
       if (
         holeChanged &&
@@ -6792,6 +7099,7 @@ function formatMoney(value) {
                   {game.game_type === 'wolf' && 'Wolf'}
                   {game.game_type === 'skins' && 'Skins'}
                   {game.game_type === 'poker' && '3-Putt Poker'}
+                  {game.game_type === 'matchplay' && 'Team Matchplay'}
                 </div>
               ))}
             </div>
@@ -6825,6 +7133,14 @@ function formatMoney(value) {
   const hasPoker = joinedRound.games.some(
     game => game.game_type === 'poker'
   )
+
+  const hasMatchplay = joinedRound.games.some(
+    game => game.game_type === 'matchplay'
+  )
+
+  const viewerMatchplaySummary = hasMatchplay
+    ? summariseMatchplay(joinedRound, viewerMatchplayResults)
+    : null
 
   const totals = hasWolf
     ? calculateWolfPoints(joinedRound, viewerWolfResults)
@@ -7043,6 +7359,22 @@ function formatMoney(value) {
                 </div>
               </>
             )}
+          </>
+        )}
+
+        {hasMatchplay && viewerMatchplaySummary && (
+          <>
+            <div className="viewer-section-title">
+              <span>Team Matchplay</span>
+              <span>Lunch</span>
+            </div>
+
+            <div className="scoreboard-card">
+              <div className="score-row">
+                <span>{viewerMatchplaySummary.headline}</span>
+                <strong>{viewerMatchplaySummary.detail}</strong>
+              </div>
+            </div>
           </>
         )}
 
@@ -7328,9 +7660,17 @@ function formatMoney(value) {
     game => game.game_type === 'poker'
   )
 
+  const hasMatchplay = activeRound.games.some(
+    game => game.game_type === 'matchplay'
+  )
+
   // Wolf result, winning-score type and the Skins winner are all worked out
   // from the nett scores on save — nothing to preview here.
   const holeParValue = Number(holePar) || 4
+
+  const matchplaySummary = hasMatchplay
+    ? summariseMatchplay(activeRound, matchplayResults)
+    : null
 
   const skinsCarryoversOn = hasSkins
     ? Boolean(getSkinsSettings(activeRound).carryovers)
@@ -7642,6 +7982,19 @@ function formatMoney(value) {
     </div>
   )}
 
+  {/* TEAM MATCHPLAY */}
+  {hasMatchplay && matchplaySummary && (
+    <div className="game-scoring-block">
+      <p className="eyebrow">TEAM MATCHPLAY · LUNCH</p>
+
+      <p className="skin-worth-line">
+        <span className="skin-worth-value">{matchplaySummary.headline}</span>
+      </p>
+
+      <p className="viewer-note">{matchplaySummary.detail}</p>
+    </div>
+  )}
+
   {/* 3-PUTT POKER */}
   {hasPoker && (
     <div className="game-scoring-block">
@@ -7775,6 +8128,22 @@ function formatMoney(value) {
                   <strong>{skinsTotals[player.id] || 0}</strong>
                 </div>
               ))}
+            </div>
+          </>
+        )}
+
+        {hasMatchplay && matchplaySummary && (
+          <>
+            <div className="viewer-section-title">
+              <span>Team Matchplay</span>
+              <span>Lunch</span>
+            </div>
+
+            <div className="scoreboard-card">
+              <div className="score-row">
+                <span>{matchplaySummary.headline}</span>
+                <strong>{matchplaySummary.detail}</strong>
+              </div>
             </div>
           </>
         )}
@@ -8257,6 +8626,41 @@ function formatMoney(value) {
                     }
                   />
                 </label>
+              </div>
+            )}
+
+            <label className="game-toggle">
+              <input
+                type="checkbox"
+                checked={matchplayEnabled}
+                onChange={e => setMatchplayEnabled(e.target.checked)}
+              />
+              <span>Team Matchplay (lunch)</span>
+            </label>
+
+            {matchplayEnabled && (
+              <div className="settings-grid">
+                {skinsEnabled && skinsMode === 'team' ? (
+                  <p className="field-note">
+                    Using your Skins teams. Best-ball score each hole decides who buys lunch.
+                  </p>
+                ) : (
+                  <label>
+                    Teams
+                    <select
+                      value={matchplayTeamPairing}
+                      onChange={e => setMatchplayTeamPairing(e.target.value)}
+                    >
+                      <option value="12v34">{(players[0] || 'Player 1')} + {(players[1] || 'Player 2')} vs {(players[2] || 'Player 3')} + {(players[3] || 'Player 4')}</option>
+                      <option value="13v24">{(players[0] || 'Player 1')} + {(players[2] || 'Player 3')} vs {(players[1] || 'Player 2')} + {(players[3] || 'Player 4')}</option>
+                      <option value="14v23">{(players[0] || 'Player 1')} + {(players[3] || 'Player 4')} vs {(players[1] || 'Player 2')} + {(players[2] || 'Player 3')}</option>
+                    </select>
+                  </label>
+                )}
+
+                {playerCount !== 4 && (
+                  <span className="field-note">Team Matchplay requires 4 players.</span>
+                )}
               </div>
             )}
           </div>
