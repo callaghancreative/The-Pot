@@ -870,6 +870,23 @@ function getPokerOutcome(round, results) {
   }
 }
 
+// 'live' (default): cards and hands show as they're dealt, hole by hole.
+// 'end': hands stay face-down (card/fine counts still visible) until the
+// round is finished, then the host reveals players one at a time, in the
+// order they were entered, for a live, synchronised showdown.
+function getPokerRevealMode(round) {
+  return getPokerSettings(round).revealMode === 'end' ? 'end' : 'live'
+}
+
+// The showdown spotlights one player at a time, two taps each: one flips
+// their cards face up, the next moves the spotlight on to the next player
+// on deck (face down). The very first player starts on deck for free, and
+// the very last flip needs no further "move on" tap, so N players take
+// 2N - 1 taps in total.
+function getPokerRevealTotalSteps(playerCount) {
+  return Math.max(playerCount * 2 - 1, 0)
+}
+
 function calculatePokerSettlement(round, results) {
   const settings = getPokerSettings(round)
   const totals = calculatePokerTotals(
@@ -942,6 +959,80 @@ function formatPokerCard(card) {
   }
 
   return `${rank}${suits[suit] || suit}`
+}
+
+// A single playing card that physically flips from face-down to face-up
+// on a 3D transform, triggered purely by the "flipped" class — the host
+// tapping and every viewer's screen receiving the same realtime update
+// all play the same flip at (near enough) the same moment. delaySeconds
+// staggers a hand's cards so they turn over one after another.
+function PokerFlipCard({ card, flipped, delaySeconds = 0 }) {
+  const suit = card ? card.slice(-1) : ''
+  const isRed = suit === 'H' || suit === 'D'
+
+  return (
+    <div className="poker-card">
+      <div
+        className={flipped ? 'poker-card-inner flipped' : 'poker-card-inner'}
+        style={{ transitionDelay: `${delaySeconds}s` }}
+      >
+        <div className="poker-card-face poker-card-back" aria-hidden="true" />
+        <div
+          className={
+            isRed
+              ? 'poker-card-face poker-card-front red'
+              : 'poker-card-face poker-card-front'
+          }
+        >
+          {formatPokerCard(card)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The showdown "stage": one player at a time, their cards flipping face up
+// in sequence, their best hand landing right after the last card turns.
+function PokerShowdownStage({ player, cards, hand, flipped, footer }) {
+  const lastCardDelay = cards.length
+    ? (cards.length - 1) * 0.3
+    : 0
+
+  return (
+    <div className="poker-showdown">
+      <p className="poker-showdown-label">
+        {flipped ? 'Revealed' : 'Now Revealing'}
+      </p>
+
+      <h2 className="poker-showdown-name">{player.name}</h2>
+
+      <div className="poker-hand-row">
+        {cards.length ? (
+          cards.map((card, index) => (
+            <PokerFlipCard
+              key={index}
+              card={card}
+              flipped={flipped}
+              delaySeconds={index * 0.3}
+            />
+          ))
+        ) : (
+          <div className="poker-card poker-card-empty">
+            <span>No cards</span>
+          </div>
+        )}
+      </div>
+
+      <p
+        className={flipped ? 'poker-showdown-hand visible' : 'poker-showdown-hand'}
+        style={{ transitionDelay: `${lastCardDelay + 0.35}s` }}
+      >
+        {hand ? hand.name : 'No hand — no cards dealt'}
+      </p>
+
+      {footer}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1079,11 +1170,12 @@ function App() {
 
   const [skinsMode, setSkinsMode] = useState('individual')
   const [skinsTeamPairing, setSkinsTeamPairing] = useState('12v34')
-  const [skinsDollar, setSkinsDollar] = useState(5)
+  const [skinsDollar, setSkinsDollar] = useState(1)
   const [skinsCarryovers, setSkinsCarryovers] = useState(true)
 
-  const [pokerFineValue, setPokerFineValue] = useState(2)
+  const [pokerFineValue, setPokerFineValue] = useState(1)
   const [pokerBuyIn, setPokerBuyIn] = useState(10)
+  const [pokerRevealMode, setPokerRevealMode] = useState('live')
 
   const [joinCode, setJoinCode] = useState('')
   const [joinedRound, setJoinedRound] = useState(null)
@@ -1141,10 +1233,10 @@ function App() {
 
   const [eventSkinsMode, setEventSkinsMode] = useState('individual')
   const [eventSkinsTeamPairing, setEventSkinsTeamPairing] = useState('12v34')
-  const [eventSkinsDollar, setEventSkinsDollar] = useState(5)
+  const [eventSkinsDollar, setEventSkinsDollar] = useState(1)
   const [eventSkinsCarryovers, setEventSkinsCarryovers] = useState(true)
 
-  const [eventPokerFineValue, setEventPokerFineValue] = useState(2)
+  const [eventPokerFineValue, setEventPokerFineValue] = useState(1)
   const [eventPokerBuyIn, setEventPokerBuyIn] = useState(10)
 
   const [eventSideRound, setEventSideRound] = useState(null)
@@ -1749,10 +1841,10 @@ function App() {
 
     setEventSkinsMode('individual')
     setEventSkinsTeamPairing('12v34')
-    setEventSkinsDollar(5)
+    setEventSkinsDollar(1)
     setEventSkinsCarryovers(true)
 
-    setEventPokerFineValue(2)
+    setEventPokerFineValue(1)
     setEventPokerBuyIn(10)
   }
 
@@ -4165,6 +4257,17 @@ function App() {
         scores: mergedRoundScores
       })
 
+      // The last hole's button reads "Settle the Pot" regardless of which
+      // games are on; when Poker's one of them, settling also jumps
+      // straight down to its cards.
+      if (hasPoker) {
+        requestAnimationFrame(() => {
+          document
+            .getElementById('poker-reveal-section')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        })
+      }
+
       return
     }
 
@@ -4318,7 +4421,10 @@ function App() {
         .update({
           current_hole: undoHole,
           status: 'active',
-          completed_at: null
+          completed_at: null,
+          // Undoing hole 18 un-finishes the round, so a Poker showdown
+          // that was mid-reveal shouldn't resume half-revealed later.
+          poker_reveal_step: 0
         })
         .eq('id', activeRound.id)
 
@@ -4353,6 +4459,7 @@ function App() {
         current_hole: undoHole,
         status: 'active',
         completed_at: null,
+        poker_reveal_step: 0,
         holeIndex: undoIndex
       }))
 
@@ -4396,6 +4503,44 @@ function App() {
       console.error(err)
       setError(
         err.message || 'Could not undo the last hole.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Reveal-at-the-end Poker: flip the next player's hand (in the order
+  // they were entered at setup) for the host and every viewer at once by
+  // bumping poker_reveal_step on the round row — it rides the same
+  // realtime subscription viewers already use to follow current_hole, so
+  // nothing else needs to change to keep everyone in sync.
+  async function revealNextPokerHand() {
+    if (!activeRound) return
+
+    try {
+      setError('')
+      setLoading(true)
+
+      const nextStep = Math.min(
+        (Number(activeRound.poker_reveal_step) || 0) + 1,
+        getPokerRevealTotalSteps(activeRound.players.length)
+      )
+
+      const { error: revealError } = await supabase
+        .from('rounds')
+        .update({ poker_reveal_step: nextStep })
+        .eq('id', activeRound.id)
+
+      if (revealError) throw revealError
+
+      setActiveRound(current => ({
+        ...current,
+        poker_reveal_step: nextStep
+      }))
+    } catch (err) {
+      console.error('Poker reveal failed:', err)
+      setError(
+        err.message || 'Could not reveal the next hand.'
       )
     } finally {
       setLoading(false)
@@ -4966,7 +5111,8 @@ function formatMoney(value) {
           game_type: 'poker',
           settings: {
             fineValue: Number(pokerFineValue),
-            buyIn: Number(pokerBuyIn)
+            buyIn: Number(pokerBuyIn),
+            revealMode: pokerRevealMode
           }
         })
       }
@@ -7150,45 +7296,98 @@ function formatMoney(value) {
     ? getSkinsSettings(joinedRound)
     : {}
 
-  const viewerPokerTotals = hasPoker
-    ? calculatePokerTotals(joinedRound, viewerPokerResults)
-    : {}
-
   const viewerPokerSettings = hasPoker
     ? getPokerSettings(joinedRound)
     : {}
 
-  const viewerPokerHands = hasPoker
-    ? calculatePokerHands(
-        joinedRound,
-        viewerPokerResults
+  const isComplete =
+    joinedRound.status === 'completed'
+
+  // Mirrors the host's reveal-at-the-end handling: card/fine counts stay
+  // visible throughout, only the hands and the dollar outcome wait for
+  // the reveal, kept in sync purely via poker_reveal_step on the shared
+  // rounds row.
+  const viewerPokerRevealMode = hasPoker
+    ? getPokerRevealMode(joinedRound)
+    : 'live'
+
+  const viewerPokerRevealTotalSteps = hasPoker
+    ? getPokerRevealTotalSteps(joinedRound.players.length)
+    : 0
+
+  const viewerPokerRevealStep = Math.min(
+    Number(joinedRound.poker_reveal_step) || 0,
+    viewerPokerRevealTotalSteps
+  )
+
+  const viewerPokerRevealComplete =
+    viewerPokerRevealMode !== 'end' ||
+    viewerPokerRevealStep >= viewerPokerRevealTotalSteps
+
+  // Two taps per player on stage: an even step means they're on deck,
+  // face down; an odd step means their cards have just been flipped.
+  const viewerPokerSpotlightIndex = hasPoker
+    ? Math.min(
+        Math.floor(viewerPokerRevealStep / 2),
+        Math.max(joinedRound.players.length - 1, 0)
       )
+    : 0
+
+  const viewerPokerSpotlightFlipped = viewerPokerRevealStep % 2 === 1
+
+  const viewerPokerTotals = hasPoker
+    ? calculatePokerTotals(joinedRound, viewerPokerResults)
     : {}
+
+  const viewerPokerHands = hasPoker
+    ? calculatePokerHands(joinedRound, viewerPokerResults)
+    : {}
+
+  const viewerPokerResultsForSettlement = viewerPokerRevealComplete
+    ? viewerPokerResults
+    : []
 
   const viewerPokerOutcome = hasPoker
     ? getPokerOutcome(
         joinedRound,
-        viewerPokerResults
+        viewerPokerResultsForSettlement
       )
     : null
 
   const viewerPokerSettlement =
-    hasPoker && joinedRound.status === 'completed'
+    hasPoker && isComplete
       ? calculatePokerSettlement(
           joinedRound,
-          viewerPokerResults
+          viewerPokerResultsForSettlement
         )
       : null
 
-  const isComplete =
-    joinedRound.status === 'completed'
+  // Who has Wolf this hole and who picks it up next hole, worked out
+  // from the same rotation the host uses.
+  const viewerHoleSequence = buildHoleSequence(joinedRound.starting_hole)
+
+  let viewerHoleIndex = viewerHoleSequence.findIndex(
+    hole => Number(hole) === Number(joinedRound.current_hole)
+  )
+
+  if (viewerHoleIndex < 0) viewerHoleIndex = 0
+
+  const currentWolf =
+    hasWolf && !isComplete
+      ? getScheduledWolf(joinedRound, viewerHoleIndex, viewerWolfResults)
+      : null
+
+  const nextWolf =
+    hasWolf && !isComplete && viewerHoleIndex + 1 < 18
+      ? getScheduledWolf(joinedRound, viewerHoleIndex + 1, viewerWolfResults)
+      : null
 
   const viewerCombinedPositions =
     calculateCombinedPositions(
       joinedRound,
       viewerWolfResults,
       viewerSkinsResults,
-      viewerPokerResults
+      viewerPokerResultsForSettlement
     )
 
   const viewerSettlementPayments =
@@ -7265,6 +7464,17 @@ function formatMoney(value) {
               <span>
                 {viewerWolfResults.length} holes scored
               </span>
+            </div>
+
+            <div className="wolf-turn-banner">
+              <div className="wolf-turn-slot current">
+                <span className="wolf-turn-label">🐺 Wolf</span>
+                <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
+              </div>
+              <div className="wolf-turn-slot">
+                <span className="wolf-turn-label">Next Up</span>
+                <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
+              </div>
             </div>
 
             <div className="scoreboard-card">
@@ -7379,12 +7589,16 @@ function formatMoney(value) {
             <div className="viewer-section-title">
               <span>3-Putt Poker</span>
               <span>
-                ${Number(viewerPokerSettings.buyIn || 0)} buy-in · ${Number(viewerPokerSettings.fineValue || 0)} / fine
+                {viewerPokerRevealMode === 'end' && !viewerPokerRevealComplete
+                  ? isComplete
+                    ? 'Showdown in progress'
+                    : 'Hands face down until hole 18'
+                  : `$${Number(viewerPokerSettings.buyIn || 0)} buy-in · $${Number(viewerPokerSettings.fineValue || 0)} / fine`}
               </span>
             </div>
 
             <div className="scoreboard-card">
-              {joinedRound.players.map(player => {
+              {joinedRound.players.map((player, index) => {
                 const pokerTotal = viewerPokerTotals[player.id] || {
                   cards: 0,
                   fines: 0
@@ -7396,6 +7610,11 @@ function formatMoney(value) {
                 const bestHand =
                   getBestDisplayPokerHand(cards)
 
+                // Cards and fines counts are always shown — only the hand
+                // itself waits for this player's turn on the showdown stage.
+                const revealed =
+                  viewerPokerRevealMode !== 'end' || viewerPokerRevealStep >= index * 2 + 1
+
                 return (
                   <div
                     key={player.id}
@@ -7404,14 +7623,18 @@ function formatMoney(value) {
                     <span>
                       {player.name}
                       <small className="viewer-note">
-                        {cards.length
-                          ? ` · ${cards.map(formatPokerCard).join(' ')}`
-                          : ' · No cards yet'}
+                        {revealed
+                          ? (cards.length
+                              ? ` · ${cards.map(formatPokerCard).join(' ')}`
+                              : ' · No cards yet')
+                          : (pokerTotal.cards > 0
+                              ? ' · 🂠 face down'
+                              : ' · No cards yet')}
                       </small>
                     </span>
 
                     <strong>
-                      {bestHand
+                      {revealed && bestHand
                         ? bestHand.name
                         : `${pokerTotal.cards} cards`}
                       {' · '}
@@ -7422,18 +7645,48 @@ function formatMoney(value) {
               })}
             </div>
 
-            {isComplete &&
-              viewerPokerSettlement?.outcome?.status === 'winner' && (
-                <div className="success-card">
-                  <p className="eyebrow">
-                    POKER WINNER
-                  </p>
+            {/* SHOWDOWN STAGE — read-only mirror of the host's. No button:
+                the host paces it, this screen just watches poker_reveal_step
+                change over the same realtime subscription that already
+                carries current_hole, and plays the same flip in the same
+                moment. */}
+            {isComplete && !viewerPokerRevealComplete && (() => {
+              const spotlightPlayer = joinedRound.players[viewerPokerSpotlightIndex]
+              const spotlightCards = viewerPokerHands[spotlightPlayer.id] || []
+              const spotlightHand = getBestDisplayPokerHand(spotlightCards)
+              const isLastPlayer =
+                viewerPokerSpotlightIndex >= joinedRound.players.length - 1
 
-                  <h2>
+              return (
+                <PokerShowdownStage
+                  player={spotlightPlayer}
+                  cards={spotlightCards}
+                  hand={spotlightHand}
+                  flipped={viewerPokerSpotlightFlipped}
+                  footer={
+                    <p className="viewer-note poker-showdown-waiting">
+                      {isLastPlayer && viewerPokerSpotlightFlipped
+                        ? 'Waiting for the host to announce the winner...'
+                        : 'Waiting for the host...'}
+                    </p>
+                  }
+                />
+              )
+            })()}
+
+            {isComplete &&
+              viewerPokerRevealComplete &&
+              viewerPokerSettlement?.outcome?.status === 'winner' && (
+                <div className="success-card poker-winner-card">
+                  <p className="eyebrow poker-winner-eyebrow">🏆 Poker Winner</p>
+
+                  <h2 className="poker-winner-name">
                     {viewerPokerSettlement.outcome.winner.player.name}
-                    {' · '}
-                    {viewerPokerSettlement.outcome.winner.hand.name}
                   </h2>
+
+                  <p className="poker-winner-hand">
+                    {viewerPokerSettlement.outcome.winner.hand.name}
+                  </p>
 
                   <p className="success-copy">
                     Winning hand:{' '}
@@ -7442,26 +7695,29 @@ function formatMoney(value) {
                       .join(' ')}
                   </p>
 
+                  <div className="poker-winner-divider" />
+
+                  <p className="poker-winner-subhead">Payment Summary</p>
+
                   <div className="player-list">
                     {viewerPokerSettlement.payments.map(payment => (
                       <div
                         key={payment.player.id}
-                        className="player-pill"
+                        className="player-pill poker-winner-pill"
                       >
-                        {payment.player.name} owes $
-                        {payment.total.toFixed(2)}
+                        {payment.player.name} owes <strong>${payment.total.toFixed(2)}</strong>
                       </div>
                     ))}
                   </div>
 
-                  <p className="success-copy">
-                    Total received: $
-                    {viewerPokerSettlement.winnerReceives.toFixed(2)}
+                  <p className="poker-winner-total">
+                    Total received: ${viewerPokerSettlement.winnerReceives.toFixed(2)}
                   </p>
                 </div>
               )}
 
             {isComplete &&
+              viewerPokerRevealComplete &&
               viewerPokerOutcome?.status === 'tie' && (
                 <div className="error-message">
                   Poker is tied between{' '}
@@ -7473,6 +7729,7 @@ function formatMoney(value) {
               )}
 
             {isComplete &&
+              viewerPokerRevealComplete &&
               viewerPokerOutcome?.status === 'no-winner' && (
                 <div className="error-message">
                   No cards dealt this round, so there’s no Poker winner.
@@ -7536,7 +7793,8 @@ function formatMoney(value) {
               <h2>The pot is settled.</h2>
             </div>
 
-            {viewerSettlementPayments.length > 0 && (
+            {viewerSettlementPayments.length > 0 &&
+              (hasPoker ? viewerPokerRevealComplete : true) && (
               <>
                 <div className="viewer-section-title">
                   <span>Settle Up</span>
@@ -7644,6 +7902,10 @@ function formatMoney(value) {
     ? null
     : activeRound.holeSequence[activeRound.holeIndex]
 
+  // Locking in the 18th hole settles every game at once, so it gets its
+  // own call to action instead of just counting up another hole.
+  const isLastHole = activeRound.holeIndex === 17
+
   const hasWolf = activeRound.games.some(
     game => game.game_type === 'wolf'
   )
@@ -7676,6 +7938,19 @@ function formatMoney(value) {
     ? calculateWolfPoints(activeRound, wolfResults)
     : {}
 
+  // Who has Wolf this hole (the scorer's selection, defaulting to the
+  // scheduled rotation) and who picks it up next hole.
+  const currentWolf =
+    hasWolf && !finished
+      ? activeRound.players.find(player => player.id === wolfPlayerId) ||
+        getScheduledWolf(activeRound, activeRound.holeIndex, wolfResults)
+      : null
+
+  const nextWolf =
+    hasWolf && !finished && activeRound.holeIndex + 1 < 18
+      ? getScheduledWolf(activeRound, activeRound.holeIndex + 1, wolfResults)
+      : null
+
   const currentSkinValue = hasSkins
     ? getCurrentSkinsValue(activeRound, skinsResults)
     : 0
@@ -7684,25 +7959,65 @@ function formatMoney(value) {
     ? calculateSkinsTotals(activeRound, skinsResults)
     : {}
 
+  const pokerSettings = hasPoker
+    ? getPokerSettings(activeRound)
+    : {}
+
+  // "At the end": every card is still dealt hole by hole underneath, and
+  // card/fine counts stay visible throughout — only the actual hands and
+  // the dollar outcome stay hidden. Once the round finishes, the host
+  // reveals players one at a time, in the order they were entered, and
+  // the last reveal is the big finish. poker_reveal_step is shared with
+  // the viewer over the same realtime round subscription that already
+  // carries current_hole.
+  const pokerRevealMode = hasPoker
+    ? getPokerRevealMode(activeRound)
+    : 'live'
+
+  const pokerRevealTotalSteps = hasPoker
+    ? getPokerRevealTotalSteps(activeRound.players.length)
+    : 0
+
+  const pokerRevealStep = Math.min(
+    Number(activeRound.poker_reveal_step) || 0,
+    pokerRevealTotalSteps
+  )
+
+  const pokerRevealComplete =
+    pokerRevealMode !== 'end' ||
+    pokerRevealStep >= pokerRevealTotalSteps
+
+  // Two taps per player on stage: an even step means they're on deck,
+  // face down; an odd step means their cards have just been flipped.
+  const pokerSpotlightIndex = hasPoker
+    ? Math.min(
+        Math.floor(pokerRevealStep / 2),
+        Math.max(activeRound.players.length - 1, 0)
+      )
+    : 0
+
+  const pokerSpotlightFlipped = pokerRevealStep % 2 === 1
+
+  // Card and fine counts are safe to show any time — they don't say
+  // anything about who's winning. Only the dollar totals need to stay
+  // hidden until the reveal finishes, or the Live Pot total and
+  // Settle Up amounts would tip off the outcome early.
   const pokerTotals = hasPoker
     ? calculatePokerTotals(activeRound, pokerResults)
     : {}
 
   const pokerHands = hasPoker
-    ? calculatePokerHands(
-        activeRound,
-        pokerResults
-      )
+    ? calculatePokerHands(activeRound, pokerResults)
     : {}
 
-  const pokerSettings = hasPoker
-    ? getPokerSettings(activeRound)
-    : {}
+  const pokerResultsForSettlement = pokerRevealComplete
+    ? pokerResults
+    : []
 
   const pokerOutcome = hasPoker
     ? getPokerOutcome(
         activeRound,
-        pokerResults
+        pokerResultsForSettlement
       )
     : null
 
@@ -7710,7 +8025,7 @@ function formatMoney(value) {
     hasPoker && finished
       ? calculatePokerSettlement(
           activeRound,
-          pokerResults
+          pokerResultsForSettlement
         )
       : null
 
@@ -7719,7 +8034,7 @@ function formatMoney(value) {
       activeRound,
       wolfResults,
       skinsResults,
-      pokerResults
+      pokerResultsForSettlement
     )
 
   const settlementPayments =
@@ -7806,6 +8121,230 @@ function formatMoney(value) {
         >
           Leave Round
         </button>
+
+        {hasWolf && (
+          <>
+            <div className="viewer-section-title">
+              <span>Wolf Standings</span>
+              <span>Points</span>
+            </div>
+
+            <div className="wolf-turn-banner">
+              <div className="wolf-turn-slot current">
+                <span className="wolf-turn-label">🐺 Wolf</span>
+                <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
+              </div>
+              <div className="wolf-turn-slot">
+                <span className="wolf-turn-label">Next Up</span>
+                <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
+              </div>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map(player => (
+                <div
+                  key={player.id}
+                  className="score-row"
+                >
+                  <span>{player.name}</span>
+                  <strong>
+                    {totals[player.id] > 0 ? '+' : ''}
+                    {totals[player.id] || 0}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {hasSkins && (
+          <>
+            <div className="viewer-section-title">
+              <span>Skins Standings</span>
+              <span>Skins Won</span>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map(player => (
+                <div
+                  key={player.id}
+                  className="score-row"
+                >
+                  <span>{player.name}</span>
+                  <strong>{skinsTotals[player.id] || 0}</strong>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {hasMatchplay && matchplaySummary && (
+          <>
+            <div className="viewer-section-title">
+              <span>Team Matchplay</span>
+              <span>Lunch</span>
+            </div>
+
+            <div className="scoreboard-card">
+              <div className="score-row">
+                <span>{matchplaySummary.teamLabel}</span>
+                <strong>{matchplaySummary.statusText}</strong>
+              </div>
+            </div>
+          </>
+        )}
+
+        {hasPoker && (
+          <>
+            <div className="viewer-section-title" id="poker-reveal-section">
+              <span>3-Putt Poker</span>
+              <span>
+                {pokerRevealMode === 'end' && !pokerRevealComplete
+                  ? finished
+                    ? 'Showdown in progress'
+                    : 'Hands face down until hole 18'
+                  : `$${Number(pokerSettings.buyIn || 0)} buy-in · $${Number(pokerSettings.fineValue || 0)} / fine`}
+              </span>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map((player, index) => {
+                const pokerTotal = pokerTotals[player.id] || {
+                  cards: 0,
+                  fines: 0
+                }
+
+                const cards =
+                  pokerHands[player.id] || []
+
+                const bestHand =
+                  getBestDisplayPokerHand(cards)
+
+                // Cards and fines counts are always shown — only the hand
+                // itself waits for this player's turn on the showdown stage.
+                const revealed =
+                  pokerRevealMode !== 'end' || pokerRevealStep >= index * 2 + 1
+
+                return (
+                  <div
+                    key={player.id}
+                    className="score-row"
+                  >
+                    <span>
+                      {player.name}
+                      <small className="viewer-note">
+                        {revealed
+                          ? (cards.length
+                              ? ` · ${cards.map(formatPokerCard).join(' ')}`
+                              : ' · No cards yet')
+                          : (pokerTotal.cards > 0
+                              ? ' · 🂠 face down'
+                              : ' · No cards yet')}
+                      </small>
+                    </span>
+
+                    <strong>
+                      {revealed && bestHand
+                        ? bestHand.name
+                        : `${pokerTotal.cards} cards`}
+                      {' · '}
+                      {pokerTotal.fines} fines
+                    </strong>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* SHOWDOWN STAGE — one player at a time, cards flipping face up
+                for real drama. Every viewer's screen plays the same flip at
+                the same moment the host taps, off poker_reveal_step. */}
+            {finished && !pokerRevealComplete && (() => {
+              const spotlightPlayer = activeRound.players[pokerSpotlightIndex]
+              const spotlightCards = pokerHands[spotlightPlayer.id] || []
+              const spotlightHand = getBestDisplayPokerHand(spotlightCards)
+              const isLastPlayer =
+                pokerSpotlightIndex >= activeRound.players.length - 1
+
+              // The final tap, once the last player's cards are already
+              // face up, gets a bigger, unmissable button of its own.
+              const isAnnounceStep = isLastPlayer && pokerSpotlightFlipped
+
+              const buttonLabel = !pokerSpotlightFlipped
+                ? `Flip ${spotlightPlayer.name}'s Cards`
+                : isLastPlayer
+                  ? 'Announce the Winner 🏆'
+                  : `Next: ${activeRound.players[pokerSpotlightIndex + 1]?.name} →`
+
+              return (
+                <PokerShowdownStage
+                  player={spotlightPlayer}
+                  cards={spotlightCards}
+                  hand={spotlightHand}
+                  flipped={pokerSpotlightFlipped}
+                  footer={
+                    <button
+                      type="button"
+                      className={
+                        isAnnounceStep
+                          ? 'primary-button create-button poker-announce-button'
+                          : 'primary-button create-button'
+                      }
+                      onClick={revealNextPokerHand}
+                      disabled={loading}
+                    >
+                      {loading ? 'Revealing...' : buttonLabel}
+                    </button>
+                  }
+                />
+              )
+            })()}
+          </>
+        )}
+
+        <div className="viewer-section-title">
+          <span>{finished ? 'Final Pot' : 'Live Pot'}</span>
+          <span>
+            {finished ? 'Final balance' : 'Current position'}
+          </span>
+        </div>
+
+        <div className="scoreboard-card">
+          {activeRound.players.map(player => {
+            const position =
+              combinedPositions[player.id] || {
+                wolf: 0,
+                skins: 0,
+                poker: 0,
+                total: 0
+              }
+
+            return (
+              <div
+                key={player.id}
+                className="score-row"
+              >
+                <span>
+                  {player.name}
+                  <small className="viewer-note">
+                    {hasWolf
+                      ? ` · Wolf ${formatMoney(position.wolf)}`
+                      : ''}
+                    {hasSkins
+                      ? ` · Skins ${formatMoney(position.skins)}`
+                      : ''}
+                    {hasPoker
+                      ? ` · Poker ${formatMoney(position.poker)}`
+                      : ''}
+                  </small>
+                </span>
+
+                <strong>
+                  {formatMoney(position.total)}
+                </strong>
+              </div>
+            )
+          })}
+        </div>
 
         {!finished && (
           <div className="form-card round-hole-card">
@@ -8077,168 +8616,12 @@ function formatMoney(value) {
     disabled={loading}
   >
     {loading
-      ? 'Locking In...'
-      : `Lock In Hole ${currentHole}`}
+      ? (isLastHole ? 'Settling...' : 'Locking In...')
+      : (isLastHole ? 'Settle the Pot' : `Lock In Hole ${currentHole}`)}
   </button>
 
             </div>
         )}
-
-        {hasWolf && (
-          <>
-            <div className="viewer-section-title">
-              <span>Wolf Standings</span>
-              <span>Points</span>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => (
-                <div
-                  key={player.id}
-                  className="score-row"
-                >
-                  <span>{player.name}</span>
-                  <strong>
-                    {totals[player.id] > 0 ? '+' : ''}
-                    {totals[player.id] || 0}
-                  </strong>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {hasSkins && (
-          <>
-            <div className="viewer-section-title">
-              <span>Skins Standings</span>
-              <span>Skins Won</span>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => (
-                <div
-                  key={player.id}
-                  className="score-row"
-                >
-                  <span>{player.name}</span>
-                  <strong>{skinsTotals[player.id] || 0}</strong>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {hasMatchplay && matchplaySummary && (
-          <>
-            <div className="viewer-section-title">
-              <span>Team Matchplay</span>
-              <span>Lunch</span>
-            </div>
-
-            <div className="scoreboard-card">
-              <div className="score-row">
-                <span>{matchplaySummary.teamLabel}</span>
-                <strong>{matchplaySummary.statusText}</strong>
-              </div>
-            </div>
-          </>
-        )}
-
-        {hasPoker && (
-          <>
-            <div className="viewer-section-title">
-              <span>3-Putt Poker</span>
-              <span>
-                ${Number(pokerSettings.buyIn || 0)} buy-in · ${Number(pokerSettings.fineValue || 0)} / fine
-              </span>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => {
-                const pokerTotal = pokerTotals[player.id] || {
-                  cards: 0,
-                  fines: 0
-                }
-
-                const cards =
-                  pokerHands[player.id] || []
-
-                const bestHand =
-                  getBestDisplayPokerHand(cards)
-
-                return (
-                  <div
-                    key={player.id}
-                    className="score-row"
-                  >
-                    <span>
-                      {player.name}
-                      <small className="viewer-note">
-                        {cards.length
-                          ? ` · ${cards.map(formatPokerCard).join(' ')}`
-                          : ' · No cards yet'}
-                      </small>
-                    </span>
-
-                    <strong>
-                      {bestHand
-                        ? bestHand.name
-                        : `${pokerTotal.cards} cards`}
-                      {' · '}
-                      {pokerTotal.fines} fines
-                    </strong>
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        )}
-
-        <div className="viewer-section-title">
-          <span>{finished ? 'Final Pot' : 'Live Pot'}</span>
-          <span>
-            {finished ? 'Final balance' : 'Current position'}
-          </span>
-        </div>
-
-        <div className="scoreboard-card">
-          {activeRound.players.map(player => {
-            const position =
-              combinedPositions[player.id] || {
-                wolf: 0,
-                skins: 0,
-                poker: 0,
-                total: 0
-              }
-
-            return (
-              <div
-                key={player.id}
-                className="score-row"
-              >
-                <span>
-                  {player.name}
-                  <small className="viewer-note">
-                    {hasWolf
-                      ? ` · Wolf ${formatMoney(position.wolf)}`
-                      : ''}
-                    {hasSkins
-                      ? ` · Skins ${formatMoney(position.skins)}`
-                      : ''}
-                    {hasPoker
-                      ? ` · Poker ${formatMoney(position.poker)}`
-                      : ''}
-                  </small>
-                </span>
-
-                <strong>
-                  {formatMoney(position.total)}
-                </strong>
-              </div>
-            )
-          })}
-        </div>
 
         {finished && (
           <>
@@ -8247,7 +8630,74 @@ function formatMoney(value) {
               <h2>The pot is settled.</h2>
             </div>
 
-            {settlementPayments.length > 0 && (
+            {/* POKER WINNER — the big finish, once every hand is revealed
+                (in "at the end" mode, the "Reveal" button above the 3-Putt
+                Poker standings gets everyone there; in "as you go" mode
+                this is already sitting here waiting). */}
+            {hasPoker &&
+              pokerRevealComplete &&
+              pokerSettlement?.outcome?.status === 'winner' && (
+                <div className="success-card poker-winner-card">
+                  <p className="eyebrow poker-winner-eyebrow">🏆 Poker Winner</p>
+
+                  <h2 className="poker-winner-name">
+                    {pokerSettlement.outcome.winner.player.name}
+                  </h2>
+
+                  <p className="poker-winner-hand">
+                    {pokerSettlement.outcome.winner.hand.name}
+                  </p>
+
+                  <p className="success-copy">
+                    Winning hand:{' '}
+                    {pokerSettlement.outcome.winner.hand.cards
+                      .map(formatPokerCard)
+                      .join(' ')}
+                  </p>
+
+                  <div className="poker-winner-divider" />
+
+                  <p className="poker-winner-subhead">Payment Summary</p>
+
+                  <div className="player-list">
+                    {pokerSettlement.payments.map(payment => (
+                      <div
+                        key={payment.player.id}
+                        className="player-pill poker-winner-pill"
+                      >
+                        {payment.player.name} owes <strong>${payment.total.toFixed(2)}</strong>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="poker-winner-total">
+                    Total received: ${pokerSettlement.winnerReceives.toFixed(2)}
+                  </p>
+                </div>
+              )}
+
+            {hasPoker &&
+              pokerRevealComplete &&
+              pokerOutcome?.status === 'tie' && (
+                <div className="error-message">
+                  Poker is tied between{' '}
+                  {pokerOutcome.winners
+                    .map(item => item.player.name)
+                    .join(' and ')}.
+                  Settle the pot manually.
+                </div>
+              )}
+
+            {hasPoker &&
+              pokerRevealComplete &&
+              pokerOutcome?.status === 'no-winner' && (
+                <div className="error-message">
+                  No cards dealt this round, so there’s no Poker winner.
+                </div>
+              )}
+
+            {/* FINAL SCREEN — the combined payment summary, last of all. */}
+            {settlementPayments.length > 0 && (hasPoker ? pokerRevealComplete : true) && (
               <>
                 <div className="viewer-section-title">
                   <span>Settle Up</span>
@@ -8280,63 +8730,6 @@ function formatMoney(value) {
                 </div>
               </>
             )}
-
-            {hasPoker &&
-              pokerSettlement?.outcome?.status === 'winner' && (
-                <div className="success-card">
-                  <p className="eyebrow">
-                    POKER WINNER
-                  </p>
-
-                  <h2>
-                    {pokerSettlement.outcome.winner.player.name}
-                    {' · '}
-                    {pokerSettlement.outcome.winner.hand.name}
-                  </h2>
-
-                  <p className="success-copy">
-                    Winning hand:{' '}
-                    {pokerSettlement.outcome.winner.hand.cards
-                      .map(formatPokerCard)
-                      .join(' ')}
-                  </p>
-
-                  <div className="player-list">
-                    {pokerSettlement.payments.map(payment => (
-                      <div
-                        key={payment.player.id}
-                        className="player-pill"
-                      >
-                        {payment.player.name} owes $
-                        {payment.total.toFixed(2)}
-                      </div>
-                    ))}
-                  </div>
-
-                  <p className="success-copy">
-                    Total received: $
-                    {pokerSettlement.winnerReceives.toFixed(2)}
-                  </p>
-                </div>
-              )}
-
-            {hasPoker &&
-              pokerOutcome?.status === 'tie' && (
-                <div className="error-message">
-                  Poker is tied between{' '}
-                  {pokerOutcome.winners
-                    .map(item => item.player.name)
-                    .join(' and ')}.
-                  Settle the pot manually.
-                </div>
-              )}
-
-            {hasPoker &&
-              pokerOutcome?.status === 'no-winner' && (
-                <div className="error-message">
-                  No cards dealt this round, so there’s no Poker winner.
-                </div>
-              )}
           </>
         )}
 
@@ -8623,6 +9016,25 @@ function formatMoney(value) {
                     }
                   />
                 </label>
+
+                <label>
+                  Reveal
+                  <select
+                    value={pokerRevealMode}
+                    onChange={e => setPokerRevealMode(e.target.value)}
+                  >
+                    <option value="live">As you go</option>
+                    <option value="end">At the end</option>
+                  </select>
+                </label>
+
+                {pokerRevealMode === 'end' && (
+                  <span className="field-note">
+                    Card and fine counts stay visible, but hands stay face down
+                    until hole 18 — then the group reveals them together, live,
+                    in the order they were entered above.
+                  </span>
+                )}
               </div>
             )}
 
