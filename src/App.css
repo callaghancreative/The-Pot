@@ -1796,6 +1796,39 @@ select option {
   gap: 14px;
 }
 
+.standings-group-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.standings-group-chip {
+  border: 1px solid rgba(16, 42, 35, 0.18);
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: transparent;
+  color: #102A23;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.standings-group-chip.active {
+  border-color: #F5A900;
+  background: #F5A900;
+  color: #102A23;
+  font-weight: 700;
+}
+
+.golf-group-members {
+  margin-top: 10px;
+}
+
+.golf-group-add-select {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .season-summary-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

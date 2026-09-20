@@ -1203,6 +1203,16 @@ function App() {
   const [seasonLoading, setSeasonLoading] = useState(false)
   const [seasonYear, setSeasonYear] = useState(new Date().getFullYear())
 
+  // Golf Groups — named rosters (e.g. "Saturday Morning Group") used to
+  // filter season standings down to a subset of golfers. Unlike Saved
+  // Groups (round-prefill helpers capped at 4), these have no member cap
+  // and any member — not just the creator — can view the group's standings.
+  const [golfGroups, setGolfGroups] = useState([])
+  const [golfGroupsLoading, setGolfGroupsLoading] = useState(false)
+  const [newGolfGroupName, setNewGolfGroupName] = useState('')
+  const [newGolfGroupSelections, setNewGolfGroupSelections] = useState([])
+  const [selectedGolfGroupId, setSelectedGolfGroupId] = useState('')
+
 
   // Tournament / Event Stage 1
   const [eventName, setEventName] = useState('')
@@ -1420,7 +1430,10 @@ function App() {
 
   async function openSeasonScreen(target) {
     if (!userProfile?.id) return
-    await loadSeasonData(userProfile.id, new Date().getFullYear())
+    await Promise.all([
+      loadSeasonData(userProfile.id, new Date().getFullYear()),
+      loadGolfGroups(userProfile.id)
+    ])
     setScreen(target)
   }
 
@@ -1878,6 +1891,228 @@ function App() {
       ...Array(4 - members.length).fill(null)
     ])
     setError('')
+  }
+
+  // Golf Groups only ever hold linked profiles — season standings are
+  // profile-based, so a guest with no profile_id has nothing to filter.
+  function getGolfGroupChoices() {
+    const choices = []
+
+    if (userProfile) {
+      choices.push({ profile_id: userProfile.id, display_name: userProfile.display_name })
+    }
+
+    savedGolfers
+      .filter(golfer => golfer.linked_profile_id)
+      .forEach(golfer => {
+        choices.push({ profile_id: golfer.linked_profile_id, display_name: golfer.display_name })
+      })
+
+    return choices
+  }
+
+  function toggleNewGolfGroupMember(profileId) {
+    setNewGolfGroupSelections(current =>
+      current.includes(profileId)
+        ? current.filter(id => id !== profileId)
+        : [...current, profileId]
+    )
+  }
+
+  async function loadGolfGroups(profileId) {
+    if (!profileId) {
+      setGolfGroups([])
+      return []
+    }
+
+    // Swallow errors rather than throw: this runs inside Promise.all
+    // alongside profile/season loads that must not be blocked by golf_groups
+    // being unavailable (e.g. its migration hasn't been run yet).
+    try {
+      const { data: memberRows, error: memberError } = await supabase
+        .from('golf_group_members')
+        .select('group_id')
+        .eq('profile_id', profileId)
+
+      if (memberError) throw memberError
+
+      const memberGroupIds = (memberRows || []).map(row => row.group_id)
+      const orFilter = memberGroupIds.length
+        ? `created_by.eq.${profileId},id.in.(${memberGroupIds.join(',')})`
+        : `created_by.eq.${profileId}`
+
+      const { data, error: groupsError } = await supabase
+        .from('golf_groups')
+        .select(`
+          id,
+          name,
+          created_by,
+          created_at,
+          golf_group_members ( profile_id, profiles ( display_name ) )
+        `)
+        .or(orFilter)
+        .order('name', { ascending: true })
+
+      if (groupsError) throw groupsError
+
+      const groups = (data || []).map(group => ({
+        ...group,
+        members: (group.golf_group_members || []).map(member => {
+          const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles
+          return {
+            profile_id: member.profile_id,
+            display_name: profile?.display_name || 'THE POT golfer'
+          }
+        })
+      }))
+
+      setGolfGroups(groups)
+      return groups
+    } catch (golfGroupsError) {
+      console.error(golfGroupsError)
+      setGolfGroups([])
+      return []
+    }
+  }
+
+  async function createGolfGroup() {
+    const groupName = newGolfGroupName.trim()
+
+    if (!groupName) {
+      setError('Give this group a name.')
+      return
+    }
+
+    if (!userProfile?.id) {
+      setError('Create your profile before creating a group.')
+      return
+    }
+
+    if (golfGroups.some(group => group.name.toLowerCase() === groupName.toLowerCase())) {
+      setError(`You already have a golf group called ${groupName}.`)
+      return
+    }
+
+    // The creator is always a member, so this group shows up in their own
+    // "my groups" query the same way it does for anyone else added to it.
+    const memberIds = Array.from(new Set([userProfile.id, ...newGolfGroupSelections]))
+
+    setGolfGroupsLoading(true)
+    setError('')
+
+    let createdGroup = null
+
+    try {
+      const { data: group, error: groupError } = await supabase
+        .from('golf_groups')
+        .insert({ name: groupName, created_by: userProfile.id })
+        .select('id, name, created_by, created_at')
+        .single()
+
+      if (groupError) throw groupError
+      createdGroup = group
+
+      const { error: membersError } = await supabase
+        .from('golf_group_members')
+        .insert(memberIds.map(profileId => ({ group_id: group.id, profile_id: profileId })))
+
+      if (membersError) throw membersError
+
+      await loadGolfGroups(userProfile.id)
+      setNewGolfGroupName('')
+      setNewGolfGroupSelections([])
+    } catch (groupError) {
+      console.error(groupError)
+
+      if (createdGroup?.id) {
+        await supabase.from('golf_groups').delete().eq('id', createdGroup.id)
+      }
+
+      setError(groupError.message || 'Could not create this group.')
+    } finally {
+      setGolfGroupsLoading(false)
+    }
+  }
+
+  async function removeGolfGroup(group) {
+    if (group.created_by !== userProfile?.id) {
+      setError('Only the golfer who created this group can remove it.')
+      return
+    }
+
+    if (!window.confirm(`Remove ${group.name}? This can't be undone.`)) return
+
+    setGolfGroupsLoading(true)
+    setError('')
+
+    try {
+      const { error: groupError } = await supabase
+        .from('golf_groups')
+        .delete()
+        .eq('id', group.id)
+
+      if (groupError) throw groupError
+
+      setGolfGroups(current => current.filter(item => item.id !== group.id))
+      setSelectedGolfGroupId(current => (current === group.id ? '' : current))
+    } catch (groupError) {
+      console.error(groupError)
+      setError(groupError.message || 'Could not remove this group.')
+    } finally {
+      setGolfGroupsLoading(false)
+    }
+  }
+
+  async function addGolfGroupMember(group, profileId) {
+    if (group.created_by !== userProfile?.id) return
+    if (group.members.some(member => member.profile_id === profileId)) return
+
+    setGolfGroupsLoading(true)
+    setError('')
+
+    try {
+      const { error: memberError } = await supabase
+        .from('golf_group_members')
+        .insert({ group_id: group.id, profile_id: profileId })
+
+      if (memberError) throw memberError
+
+      await loadGolfGroups(userProfile.id)
+    } catch (memberError) {
+      console.error(memberError)
+      setError(memberError.message || 'Could not add this golfer.')
+    } finally {
+      setGolfGroupsLoading(false)
+    }
+  }
+
+  async function removeGolfGroupMember(group, profileId) {
+    if (group.created_by !== userProfile?.id) return
+
+    if (profileId === group.created_by) {
+      setError('The group creator can’t be removed — remove the group instead.')
+      return
+    }
+
+    setGolfGroupsLoading(true)
+    setError('')
+
+    try {
+      const { error: memberError } = await supabase
+        .from('golf_group_members')
+        .delete()
+        .eq('group_id', group.id)
+        .eq('profile_id', profileId)
+
+      if (memberError) throw memberError
+
+      await loadGolfGroups(userProfile.id)
+    } catch (memberError) {
+      console.error(memberError)
+      setError(memberError.message || 'Could not remove this golfer.')
+    } finally {
+      setGolfGroupsLoading(false)
+    }
   }
 
   async function generateUniqueEventCode() {
@@ -3171,11 +3406,13 @@ function App() {
       setProfileName(profile.display_name)
       await Promise.all([
         loadSavedGolfers(user.id),
-        loadSavedGroups(user.id)
+        loadSavedGroups(user.id),
+        loadGolfGroups(user.id)
       ])
     } else {
       setSavedGolfers([])
       setSavedGroups([])
+      setGolfGroups([])
     }
 
     return profile || null
@@ -3248,7 +3485,8 @@ function App() {
       setUserProfile(profile)
       await Promise.all([
         loadSavedGolfers(profileUser.id),
-        loadSavedGroups(profileUser.id)
+        loadSavedGroups(profileUser.id),
+        loadGolfGroups(profileUser.id)
       ])
       setScreen('profile')
     } catch (profileError) {
@@ -6984,6 +7222,135 @@ function formatMoney(value) {
               </div>
             </div>
 
+            <div className="saved-groups-section golf-groups-section">
+              <div className="my-golfers-heading">
+                <div>
+                  <p className="eyebrow">GOLF GROUPS</p>
+                  <h2>Standings by crew</h2>
+                </div>
+                <span>{golfGroups.length}</span>
+              </div>
+
+              {golfGroups.length > 0 ? (
+                <div className="saved-groups-list">
+                  {golfGroups.map(group => {
+                    const isOwner = group.created_by === userProfile?.id
+                    const addableChoices = getGolfGroupChoices().filter(
+                      choice => !group.members.some(member => member.profile_id === choice.profile_id)
+                    )
+
+                    return (
+                      <div key={group.id} className="saved-group-card">
+                        <div className="saved-group-topline">
+                          <div>
+                            <strong>{group.name}</strong>
+                            <span>{group.members.length} {group.members.length === 1 ? 'golfer' : 'golfers'}</span>
+                          </div>
+                          {isOwner && (
+                            <button
+                              type="button"
+                              className="golfer-remove-button"
+                              onClick={() => removeGolfGroup(group)}
+                              disabled={golfGroupsLoading}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="saved-golfers-list golf-group-members">
+                          {group.members.map(member => (
+                            <div key={member.profile_id} className="saved-golfer-row">
+                              <div className="saved-golfer-identity">
+                                <strong>{member.display_name}</strong>
+                                {member.profile_id === group.created_by && (
+                                  <span className="golfer-status linked">Creator</span>
+                                )}
+                              </div>
+                              {isOwner && member.profile_id !== group.created_by && (
+                                <button
+                                  type="button"
+                                  className="golfer-remove-button"
+                                  onClick={() => removeGolfGroupMember(group, member.profile_id)}
+                                  disabled={golfGroupsLoading}
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {isOwner && addableChoices.length > 0 && (
+                          <select
+                            className="golf-group-add-select"
+                            value=""
+                            onChange={e => {
+                              if (e.target.value) addGolfGroupMember(group, e.target.value)
+                            }}
+                            disabled={golfGroupsLoading}
+                          >
+                            <option value="">+ Add golfer</option>
+                            {addableChoices.map(choice => (
+                              <option key={choice.profile_id} value={choice.profile_id}>
+                                {choice.display_name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="my-golfers-empty">
+                  Group your regulars — like a Saturday Morning Group — to see their own season standings.
+                </p>
+              )}
+
+              <div className="group-builder-card">
+                <div className="golfer-link-copy">
+                  <strong>Create a golf group</strong>
+                  <span>Name it and pick who&rsquo;s in &mdash; you&rsquo;re always included.</span>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Group name — e.g. Saturday Morning Group"
+                  value={newGolfGroupName}
+                  onChange={e => setNewGolfGroupName(e.target.value)}
+                />
+
+                <div className="group-member-picker">
+                  {getGolfGroupChoices()
+                    .filter(choice => choice.profile_id !== userProfile?.id)
+                    .map(choice => {
+                      const selected = newGolfGroupSelections.includes(choice.profile_id)
+
+                      return (
+                        <button
+                          key={choice.profile_id}
+                          type="button"
+                          className={selected ? 'group-member-chip selected' : 'group-member-chip'}
+                          onClick={() => toggleNewGolfGroupMember(choice.profile_id)}
+                        >
+                          {choice.display_name}
+                        </button>
+                      )
+                    })}
+                </div>
+
+                <button
+                  type="button"
+                  className="primary-button group-save-button"
+                  onClick={createGolfGroup}
+                  disabled={golfGroupsLoading}
+                >
+                  {golfGroupsLoading ? 'Saving...' : 'Save Group'}
+                </button>
+              </div>
+            </div>
+
             <div className="profile-season-actions">
               <button
                 type="button"
@@ -7092,8 +7459,15 @@ function formatMoney(value) {
   }
 
   if (screen === 'standings') {
-    const myStandingIndex = seasonStandings.findIndex(row => row.profile_id === userProfile?.id)
-    const myStanding = myStandingIndex >= 0 ? seasonStandings[myStandingIndex] : null
+    const activeGolfGroup = golfGroups.find(group => group.id === selectedGolfGroupId) || null
+    const displayedStandings = activeGolfGroup
+      ? seasonStandings.filter(row =>
+          activeGolfGroup.members.some(member => member.profile_id === row.profile_id)
+        )
+      : seasonStandings
+
+    const myStandingIndex = displayedStandings.findIndex(row => row.profile_id === userProfile?.id)
+    const myStanding = myStandingIndex >= 0 ? displayedStandings[myStandingIndex] : null
 
     return (
       <main className="app-shell">
@@ -7103,11 +7477,33 @@ function formatMoney(value) {
 
           <div className="create-header">
             <p className="eyebrow">THE POT SEASON</p>
-            <h1>{seasonYear} Standings.</h1>
+            <h1>{activeGolfGroup ? activeGolfGroup.name : `${seasonYear} Standings.`}</h1>
             <p className="intro">Every round counts. Stack points across the season and see who finishes on top.</p>
           </div>
 
           <div className="form-card season-screen-card">
+            {golfGroups.length > 0 && (
+              <div className="standings-group-picker">
+                <button
+                  type="button"
+                  className={!selectedGolfGroupId ? 'standings-group-chip active' : 'standings-group-chip'}
+                  onClick={() => setSelectedGolfGroupId('')}
+                >
+                  All Golfers
+                </button>
+                {golfGroups.map(group => (
+                  <button
+                    key={group.id}
+                    type="button"
+                    className={selectedGolfGroupId === group.id ? 'standings-group-chip active' : 'standings-group-chip'}
+                    onClick={() => setSelectedGolfGroupId(group.id)}
+                  >
+                    {group.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {myStanding && (
               <div className="season-summary-strip">
                 <div className="season-summary-stat"><span>Your Rank</span><strong>#{myStandingIndex + 1}</strong></div>
@@ -7116,13 +7512,13 @@ function formatMoney(value) {
               </div>
             )}
 
-            {seasonStandings.length > 0 ? (
+            {displayedStandings.length > 0 ? (
               <>
                 <div className="standings-header">
                   <span>#</span><span>Golfer</span><span>Rnds</span><span>Pts</span><span className="standings-net-column">Net Pot</span>
                 </div>
                 <div className="standings-list">
-                  {seasonStandings.map((row, index) => (
+                  {displayedStandings.map((row, index) => (
                     <div key={row.profile_id} className="standings-row">
                       <div className="standings-rank">{index + 1}</div>
                       <div className="standings-golfer">
@@ -7137,7 +7533,11 @@ function formatMoney(value) {
                 </div>
               </>
             ) : (
-              <p className="season-empty">The table’s empty. Finish the first round and set the benchmark.</p>
+              <p className="season-empty">
+                {activeGolfGroup
+                  ? 'No one in this group has finished a round yet.'
+                  : 'The table’s empty. Finish the first round and set the benchmark.'}
+              </p>
             )}
 
             <p className="season-rules-note">How points work: 4 players — 100 / 70 / 50 / 30; 3 players — 100 / 65 / 40; 2 players — 100 / 50. Tied positions split the points for those places evenly.</p>
@@ -7659,6 +8059,7 @@ function formatMoney(value) {
 
               return (
                 <PokerShowdownStage
+                  key={spotlightPlayer.id}
                   player={spotlightPlayer}
                   cards={spotlightCards}
                   hand={spotlightHand}
@@ -8122,230 +8523,6 @@ function formatMoney(value) {
           Leave Round
         </button>
 
-        {hasWolf && (
-          <>
-            <div className="viewer-section-title">
-              <span>Wolf Standings</span>
-              <span>Points</span>
-            </div>
-
-            <div className="wolf-turn-banner">
-              <div className="wolf-turn-slot current">
-                <span className="wolf-turn-label">🐺 Wolf</span>
-                <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
-              </div>
-              <div className="wolf-turn-slot">
-                <span className="wolf-turn-label">Next Up</span>
-                <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
-              </div>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => (
-                <div
-                  key={player.id}
-                  className="score-row"
-                >
-                  <span>{player.name}</span>
-                  <strong>
-                    {totals[player.id] > 0 ? '+' : ''}
-                    {totals[player.id] || 0}
-                  </strong>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {hasSkins && (
-          <>
-            <div className="viewer-section-title">
-              <span>Skins Standings</span>
-              <span>Skins Won</span>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map(player => (
-                <div
-                  key={player.id}
-                  className="score-row"
-                >
-                  <span>{player.name}</span>
-                  <strong>{skinsTotals[player.id] || 0}</strong>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {hasMatchplay && matchplaySummary && (
-          <>
-            <div className="viewer-section-title">
-              <span>Team Matchplay</span>
-              <span>Lunch</span>
-            </div>
-
-            <div className="scoreboard-card">
-              <div className="score-row">
-                <span>{matchplaySummary.teamLabel}</span>
-                <strong>{matchplaySummary.statusText}</strong>
-              </div>
-            </div>
-          </>
-        )}
-
-        {hasPoker && (
-          <>
-            <div className="viewer-section-title" id="poker-reveal-section">
-              <span>3-Putt Poker</span>
-              <span>
-                {pokerRevealMode === 'end' && !pokerRevealComplete
-                  ? finished
-                    ? 'Showdown in progress'
-                    : 'Hands face down until hole 18'
-                  : `$${Number(pokerSettings.buyIn || 0)} buy-in · $${Number(pokerSettings.fineValue || 0)} / fine`}
-              </span>
-            </div>
-
-            <div className="scoreboard-card">
-              {activeRound.players.map((player, index) => {
-                const pokerTotal = pokerTotals[player.id] || {
-                  cards: 0,
-                  fines: 0
-                }
-
-                const cards =
-                  pokerHands[player.id] || []
-
-                const bestHand =
-                  getBestDisplayPokerHand(cards)
-
-                // Cards and fines counts are always shown — only the hand
-                // itself waits for this player's turn on the showdown stage.
-                const revealed =
-                  pokerRevealMode !== 'end' || pokerRevealStep >= index * 2 + 1
-
-                return (
-                  <div
-                    key={player.id}
-                    className="score-row"
-                  >
-                    <span>
-                      {player.name}
-                      <small className="viewer-note">
-                        {revealed
-                          ? (cards.length
-                              ? ` · ${cards.map(formatPokerCard).join(' ')}`
-                              : ' · No cards yet')
-                          : (pokerTotal.cards > 0
-                              ? ' · 🂠 face down'
-                              : ' · No cards yet')}
-                      </small>
-                    </span>
-
-                    <strong>
-                      {revealed && bestHand
-                        ? bestHand.name
-                        : `${pokerTotal.cards} cards`}
-                      {' · '}
-                      {pokerTotal.fines} fines
-                    </strong>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* SHOWDOWN STAGE — one player at a time, cards flipping face up
-                for real drama. Every viewer's screen plays the same flip at
-                the same moment the host taps, off poker_reveal_step. */}
-            {finished && !pokerRevealComplete && (() => {
-              const spotlightPlayer = activeRound.players[pokerSpotlightIndex]
-              const spotlightCards = pokerHands[spotlightPlayer.id] || []
-              const spotlightHand = getBestDisplayPokerHand(spotlightCards)
-              const isLastPlayer =
-                pokerSpotlightIndex >= activeRound.players.length - 1
-
-              // The final tap, once the last player's cards are already
-              // face up, gets a bigger, unmissable button of its own.
-              const isAnnounceStep = isLastPlayer && pokerSpotlightFlipped
-
-              const buttonLabel = !pokerSpotlightFlipped
-                ? `Flip ${spotlightPlayer.name}'s Cards`
-                : isLastPlayer
-                  ? 'Announce the Winner 🏆'
-                  : `Next: ${activeRound.players[pokerSpotlightIndex + 1]?.name} →`
-
-              return (
-                <PokerShowdownStage
-                  player={spotlightPlayer}
-                  cards={spotlightCards}
-                  hand={spotlightHand}
-                  flipped={pokerSpotlightFlipped}
-                  footer={
-                    <button
-                      type="button"
-                      className={
-                        isAnnounceStep
-                          ? 'primary-button create-button poker-announce-button'
-                          : 'primary-button create-button'
-                      }
-                      onClick={revealNextPokerHand}
-                      disabled={loading}
-                    >
-                      {loading ? 'Revealing...' : buttonLabel}
-                    </button>
-                  }
-                />
-              )
-            })()}
-          </>
-        )}
-
-        <div className="viewer-section-title">
-          <span>{finished ? 'Final Pot' : 'Live Pot'}</span>
-          <span>
-            {finished ? 'Final balance' : 'Current position'}
-          </span>
-        </div>
-
-        <div className="scoreboard-card">
-          {activeRound.players.map(player => {
-            const position =
-              combinedPositions[player.id] || {
-                wolf: 0,
-                skins: 0,
-                poker: 0,
-                total: 0
-              }
-
-            return (
-              <div
-                key={player.id}
-                className="score-row"
-              >
-                <span>
-                  {player.name}
-                  <small className="viewer-note">
-                    {hasWolf
-                      ? ` · Wolf ${formatMoney(position.wolf)}`
-                      : ''}
-                    {hasSkins
-                      ? ` · Skins ${formatMoney(position.skins)}`
-                      : ''}
-                    {hasPoker
-                      ? ` · Poker ${formatMoney(position.poker)}`
-                      : ''}
-                  </small>
-                </span>
-
-                <strong>
-                  {formatMoney(position.total)}
-                </strong>
-              </div>
-            )
-          })}
-        </div>
-
         {!finished && (
           <div className="form-card round-hole-card">
 
@@ -8622,6 +8799,231 @@ function formatMoney(value) {
 
             </div>
         )}
+
+        {hasWolf && (
+          <>
+            <div className="viewer-section-title">
+              <span>Wolf Standings</span>
+              <span>Points</span>
+            </div>
+
+            <div className="wolf-turn-banner">
+              <div className="wolf-turn-slot current">
+                <span className="wolf-turn-label">🐺 Wolf</span>
+                <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
+              </div>
+              <div className="wolf-turn-slot">
+                <span className="wolf-turn-label">Next Up</span>
+                <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
+              </div>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map(player => (
+                <div
+                  key={player.id}
+                  className="score-row"
+                >
+                  <span>{player.name}</span>
+                  <strong>
+                    {totals[player.id] > 0 ? '+' : ''}
+                    {totals[player.id] || 0}
+                  </strong>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {hasSkins && (
+          <>
+            <div className="viewer-section-title">
+              <span>Skins Standings</span>
+              <span>Skins Won</span>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map(player => (
+                <div
+                  key={player.id}
+                  className="score-row"
+                >
+                  <span>{player.name}</span>
+                  <strong>{skinsTotals[player.id] || 0}</strong>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {hasMatchplay && matchplaySummary && (
+          <>
+            <div className="viewer-section-title">
+              <span>Team Matchplay</span>
+              <span>Lunch</span>
+            </div>
+
+            <div className="scoreboard-card">
+              <div className="score-row">
+                <span>{matchplaySummary.teamLabel}</span>
+                <strong>{matchplaySummary.statusText}</strong>
+              </div>
+            </div>
+          </>
+        )}
+
+        {hasPoker && (
+          <>
+            <div className="viewer-section-title" id="poker-reveal-section">
+              <span>3-Putt Poker</span>
+              <span>
+                {pokerRevealMode === 'end' && !pokerRevealComplete
+                  ? finished
+                    ? 'Showdown in progress'
+                    : 'Hands face down until hole 18'
+                  : `$${Number(pokerSettings.buyIn || 0)} buy-in · $${Number(pokerSettings.fineValue || 0)} / fine`}
+              </span>
+            </div>
+
+            <div className="scoreboard-card">
+              {activeRound.players.map((player, index) => {
+                const pokerTotal = pokerTotals[player.id] || {
+                  cards: 0,
+                  fines: 0
+                }
+
+                const cards =
+                  pokerHands[player.id] || []
+
+                const bestHand =
+                  getBestDisplayPokerHand(cards)
+
+                // Cards and fines counts are always shown — only the hand
+                // itself waits for this player's turn on the showdown stage.
+                const revealed =
+                  pokerRevealMode !== 'end' || pokerRevealStep >= index * 2 + 1
+
+                return (
+                  <div
+                    key={player.id}
+                    className="score-row"
+                  >
+                    <span>
+                      {player.name}
+                      <small className="viewer-note">
+                        {revealed
+                          ? (cards.length
+                              ? ` · ${cards.map(formatPokerCard).join(' ')}`
+                              : ' · No cards yet')
+                          : (pokerTotal.cards > 0
+                              ? ' · 🂠 face down'
+                              : ' · No cards yet')}
+                      </small>
+                    </span>
+
+                    <strong>
+                      {revealed && bestHand
+                        ? bestHand.name
+                        : `${pokerTotal.cards} cards`}
+                      {' · '}
+                      {pokerTotal.fines} fines
+                    </strong>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* SHOWDOWN STAGE — one player at a time, cards flipping face up
+                for real drama. Every viewer's screen plays the same flip at
+                the same moment the host taps, off poker_reveal_step. */}
+            {finished && !pokerRevealComplete && (() => {
+              const spotlightPlayer = activeRound.players[pokerSpotlightIndex]
+              const spotlightCards = pokerHands[spotlightPlayer.id] || []
+              const spotlightHand = getBestDisplayPokerHand(spotlightCards)
+              const isLastPlayer =
+                pokerSpotlightIndex >= activeRound.players.length - 1
+
+              // The final tap, once the last player's cards are already
+              // face up, gets a bigger, unmissable button of its own.
+              const isAnnounceStep = isLastPlayer && pokerSpotlightFlipped
+
+              const buttonLabel = !pokerSpotlightFlipped
+                ? `Flip ${spotlightPlayer.name}'s Cards`
+                : isLastPlayer
+                  ? 'Announce the Winner 🏆'
+                  : `Next: ${activeRound.players[pokerSpotlightIndex + 1]?.name} →`
+
+              return (
+                <PokerShowdownStage
+                  key={spotlightPlayer.id}
+                  player={spotlightPlayer}
+                  cards={spotlightCards}
+                  hand={spotlightHand}
+                  flipped={pokerSpotlightFlipped}
+                  footer={
+                    <button
+                      type="button"
+                      className={
+                        isAnnounceStep
+                          ? 'primary-button create-button poker-announce-button'
+                          : 'primary-button create-button'
+                      }
+                      onClick={revealNextPokerHand}
+                      disabled={loading}
+                    >
+                      {loading ? 'Revealing...' : buttonLabel}
+                    </button>
+                  }
+                />
+              )
+            })()}
+          </>
+        )}
+
+        <div className="viewer-section-title">
+          <span>{finished ? 'Final Pot' : 'Live Pot'}</span>
+          <span>
+            {finished ? 'Final balance' : 'Current position'}
+          </span>
+        </div>
+
+        <div className="scoreboard-card">
+          {activeRound.players.map(player => {
+            const position =
+              combinedPositions[player.id] || {
+                wolf: 0,
+                skins: 0,
+                poker: 0,
+                total: 0
+              }
+
+            return (
+              <div
+                key={player.id}
+                className="score-row"
+              >
+                <span>
+                  {player.name}
+                  <small className="viewer-note">
+                    {hasWolf
+                      ? ` · Wolf ${formatMoney(position.wolf)}`
+                      : ''}
+                    {hasSkins
+                      ? ` · Skins ${formatMoney(position.skins)}`
+                      : ''}
+                    {hasPoker
+                      ? ` · Poker ${formatMoney(position.poker)}`
+                      : ''}
+                  </small>
+                </span>
+
+                <strong>
+                  {formatMoney(position.total)}
+                </strong>
+              </div>
+            )
+          })}
+        </div>
 
         {finished && (
           <>
