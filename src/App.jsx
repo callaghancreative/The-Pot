@@ -1200,6 +1200,7 @@ function App() {
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [roundHistory, setRoundHistory] = useState([])
   const [seasonStandings, setSeasonStandings] = useState([])
+  const [seasonResultRows, setSeasonResultRows] = useState([])
   const [seasonLoading, setSeasonLoading] = useState(false)
   const [seasonYear, setSeasonYear] = useState(new Date().getFullYear())
 
@@ -1352,10 +1353,70 @@ function App() {
     if (seasonError) throw seasonError
   }
 
+  // Shared by the season-wide standings and the per-group standings below —
+  // both are just "totals per profile across this set of season_results rows."
+  function aggregateSeasonRows(rows) {
+    const byProfile = new Map()
+    rows.forEach(row => {
+      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles
+      const name = profile?.display_name || 'THE POT golfer'
+      const existing = byProfile.get(row.profile_id) || {
+        profile_id: row.profile_id,
+        display_name: name,
+        rounds: 0,
+        wins: 0,
+        points: 0,
+        netPot: 0
+      }
+
+      existing.rounds += 1
+      if (Number(row.final_position) === 1) existing.wins += 1
+      existing.points += Number(row.season_points || 0)
+      existing.netPot += Number(row.pot_total || 0)
+      byProfile.set(row.profile_id, existing)
+    })
+
+    return [...byProfile.values()]
+      .map(item => ({
+        ...item,
+        points: Math.round(item.points * 100) / 100,
+        netPot: Math.round(item.netPot * 100) / 100
+      }))
+      .sort((a, b) =>
+        b.points - a.points ||
+        b.netPot - a.netPot ||
+        a.display_name.localeCompare(b.display_name)
+      )
+  }
+
+  // A round only counts toward a golf group's standings when everyone who
+  // played it — no outside guests, no non-members — belongs to that group.
+  // Otherwise a golfer's points from an unrelated round would leak into a
+  // group they weren't playing with that day.
+  function getGroupRoundRows(rows, group) {
+    const memberIds = new Set(group.members.map(member => member.profile_id))
+
+    const byRound = new Map()
+    rows.forEach(row => {
+      if (!byRound.has(row.round_id)) byRound.set(row.round_id, [])
+      byRound.get(row.round_id).push(row)
+    })
+
+    const groupRows = []
+    byRound.forEach(roundRows => {
+      if (roundRows.every(row => memberIds.has(row.profile_id))) {
+        groupRows.push(...roundRows)
+      }
+    })
+
+    return groupRows
+  }
+
   async function loadSeasonData(profileId, year = new Date().getFullYear()) {
     if (!profileId) {
       setRoundHistory([])
       setSeasonStandings([])
+      setSeasonResultRows([])
       return
     }
 
@@ -1385,40 +1446,8 @@ function App() {
 
       const rows = data || []
       setRoundHistory(rows.filter(row => row.profile_id === profileId))
-
-      const byProfile = new Map()
-      rows.forEach(row => {
-        const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles
-        const name = profile?.display_name || 'THE POT golfer'
-        const existing = byProfile.get(row.profile_id) || {
-          profile_id: row.profile_id,
-          display_name: name,
-          rounds: 0,
-          wins: 0,
-          points: 0,
-          netPot: 0
-        }
-
-        existing.rounds += 1
-        if (Number(row.final_position) === 1) existing.wins += 1
-        existing.points += Number(row.season_points || 0)
-        existing.netPot += Number(row.pot_total || 0)
-        byProfile.set(row.profile_id, existing)
-      })
-
-      const standings = [...byProfile.values()]
-        .map(item => ({
-          ...item,
-          points: Math.round(item.points * 100) / 100,
-          netPot: Math.round(item.netPot * 100) / 100
-        }))
-        .sort((a, b) =>
-          b.points - a.points ||
-          b.netPot - a.netPot ||
-          a.display_name.localeCompare(b.display_name)
-        )
-
-      setSeasonStandings(standings)
+      setSeasonResultRows(rows)
+      setSeasonStandings(aggregateSeasonRows(rows))
       setSeasonYear(year)
     } catch (seasonError) {
       console.error(seasonError)
@@ -7461,9 +7490,7 @@ function formatMoney(value) {
   if (screen === 'standings') {
     const activeGolfGroup = golfGroups.find(group => group.id === selectedGolfGroupId) || null
     const displayedStandings = activeGolfGroup
-      ? seasonStandings.filter(row =>
-          activeGolfGroup.members.some(member => member.profile_id === row.profile_id)
-        )
+      ? aggregateSeasonRows(getGroupRoundRows(seasonResultRows, activeGolfGroup))
       : seasonStandings
 
     const myStandingIndex = displayedStandings.findIndex(row => row.profile_id === userProfile?.id)
