@@ -1632,6 +1632,60 @@ select option {
   border-top: 1px solid rgba(16, 42, 35, 0.14);
 }
 
+/* =========================================================
+   Profile screen — colour-coded group sections
+   Anything that helps you set up a round (My Golfers, Saved
+   Groups) sits on a light green panel. Anything that's about
+   saving a crew for season standings (Golf Groups) sits on the
+   light cream panel, so the two purposes read apart at a glance.
+   ========================================================= */
+.my-golfers-section,
+.saved-groups-section:not(.golf-groups-section) {
+  margin-top: 22px;
+  padding: 20px;
+  border-top: 0;
+  border-radius: 20px;
+  background: #DCE8D8;
+  color: #102A23;
+}
+
+.saved-groups-section.golf-groups-section {
+  margin-top: 22px;
+  padding: 20px;
+  border-top: 0;
+  border-radius: 20px;
+  background: #F6F0E4;
+  color: #102A23;
+}
+
+.my-golfers-section .eyebrow,
+.saved-groups-section .eyebrow {
+  color: #102A23;
+}
+
+.my-golfers-section input,
+.saved-groups-section:not(.golf-groups-section) input,
+.golf-groups-section select {
+  background: #FFFFFF;
+  color: #102A23;
+  border: 1px solid rgba(16, 42, 35, 0.3);
+}
+
+.my-golfers-section input::placeholder,
+.saved-groups-section:not(.golf-groups-section) input::placeholder {
+  color: rgba(16, 42, 35, 0.55);
+}
+
+.my-golfers-section .golfer-remove-button,
+.saved-groups-section .golfer-remove-button {
+  color: rgba(16, 42, 35, 0.65) !important;
+}
+
+.my-golfers-section .golfer-remove-button:hover,
+.saved-groups-section .golfer-remove-button:hover {
+  color: #102A23 !important;
+}
+
 .saved-groups-list,
 .quick-groups-grid {
   display: grid;
