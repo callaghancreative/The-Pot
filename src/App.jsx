@@ -1605,29 +1605,6 @@ function App() {
     }
   }
 
-  async function removeSavedGolfer(golfer) {
-    if (!window.confirm(`Remove ${golfer.display_name} from My Golfers?`)) return
-
-    setGolfersLoading(true)
-    setError('')
-
-    try {
-      const { error: golferError } = await supabase
-        .from('saved_golfers')
-        .delete()
-        .eq('id', golfer.id)
-
-      if (golferError) throw golferError
-
-      setSavedGolfers(current => current.filter(item => item.id !== golfer.id))
-    } catch (golferError) {
-      console.error(golferError)
-      setError(golferError.message || 'Could not remove this golfer.')
-    } finally {
-      setGolfersLoading(false)
-    }
-  }
-
   async function loadSavedGroups(userId) {
     if (!userId) {
       setSavedGroups([])
@@ -7080,37 +7057,13 @@ function formatMoney(value) {
               <div className="my-golfers-heading">
                 <div>
                   <p className="eyebrow">MY GOLFERS</p>
-                  <h2>The usual crew</h2>
+                  <h2>Add golfers you play with</h2>
                 </div>
-                <span>{savedGolfers.length}</span>
               </div>
 
-              {savedGolfers.length > 0 ? (
-                <div className="saved-golfers-list">
-                  {savedGolfers.map(golfer => (
-                    <div key={golfer.id} className="saved-golfer-row">
-                      <div className="saved-golfer-identity">
-                        <strong>{golfer.display_name}</strong>
-                        <span className={golfer.linked_profile_id ? 'golfer-status linked' : 'golfer-status guest'}>
-                          {golfer.linked_profile_id ? 'Linked' : 'Guest'}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        className="golfer-remove-button"
-                        onClick={() => removeSavedGolfer(golfer)}
-                        disabled={golfersLoading}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="my-golfers-empty">
-                  Add the golfers you play with most. They’ll be ready to go next Saturday.
-                </p>
-              )}
+              <p className="my-golfers-empty">
+                Link a THE POT golfer or add a guest so they&rsquo;re ready to pick when you build a saved group below.
+              </p>
 
               <div className="golfer-link-card">
                 <div className="golfer-link-copy">
@@ -7255,10 +7208,14 @@ function formatMoney(value) {
               <div className="my-golfers-heading">
                 <div>
                   <p className="eyebrow">GOLF GROUPS</p>
-                  <h2>Standings by crew</h2>
+                  <h2>Your crews</h2>
                 </div>
                 <span>{golfGroups.length}</span>
               </div>
+
+              <p className="my-golfers-empty golf-groups-intro">
+                Manage who&rsquo;s in each crew here — their standings show up as a filter on the Standings screen.
+              </p>
 
               {golfGroups.length > 0 ? (
                 <div className="saved-groups-list">
@@ -7331,11 +7288,7 @@ function formatMoney(value) {
                     )
                   })}
                 </div>
-              ) : (
-                <p className="my-golfers-empty">
-                  Group your regulars — like a Saturday Morning Group — to see their own season standings.
-                </p>
-              )}
+              ) : null}
 
               <div className="group-builder-card">
                 <div className="golfer-link-copy">
