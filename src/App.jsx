@@ -1175,7 +1175,7 @@ function App() {
 
   const [pokerFineValue, setPokerFineValue] = useState(1)
   const [pokerBuyIn, setPokerBuyIn] = useState(10)
-  const [pokerRevealMode, setPokerRevealMode] = useState('live')
+  const [pokerRevealMode, setPokerRevealMode] = useState('end')
 
   const [joinCode, setJoinCode] = useState('')
   const [joinedRound, setJoinedRound] = useState(null)
