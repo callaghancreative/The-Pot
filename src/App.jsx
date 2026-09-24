@@ -7884,6 +7884,21 @@ function formatMoney(value) {
           </div>
         </div>
 
+        {/* Always pinned at the top of the screen, independent of where the
+            Wolf Standings section falls in the order below. */}
+        {hasWolf && !isComplete && (
+          <div className="wolf-turn-banner">
+            <div className="wolf-turn-slot current">
+              <span className="wolf-turn-label">🐺 Wolf</span>
+              <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
+            </div>
+            <div className="wolf-turn-slot">
+              <span className="wolf-turn-label">Next Up</span>
+              <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
+            </div>
+          </div>
+        )}
+
         {hasWolf && (
           <>
             <div className="viewer-section-title">
@@ -7891,17 +7906,6 @@ function formatMoney(value) {
               <span>
                 {viewerWolfResults.length} holes scored
               </span>
-            </div>
-
-            <div className="wolf-turn-banner">
-              <div className="wolf-turn-slot current">
-                <span className="wolf-turn-label">🐺 Wolf</span>
-                <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
-              </div>
-              <div className="wolf-turn-slot">
-                <span className="wolf-turn-label">Next Up</span>
-                <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
-              </div>
             </div>
 
             <div className="scoreboard-card">
@@ -8537,6 +8541,21 @@ function formatMoney(value) {
           </div>
         </div>
 
+        {/* Always pinned at the top of the screen, independent of where the
+            Wolf Standings section falls in the order below. */}
+        {hasWolf && !finished && (
+          <div className="wolf-turn-banner">
+            <div className="wolf-turn-slot current">
+              <span className="wolf-turn-label">🐺 Wolf</span>
+              <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
+            </div>
+            <div className="wolf-turn-slot">
+              <span className="wolf-turn-label">Next Up</span>
+              <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
+            </div>
+          </div>
+        )}
+
         {shareStatus && (
           <p className="share-status active-share-status">{shareStatus}</p>
         )}
@@ -8832,17 +8851,6 @@ function formatMoney(value) {
             <div className="viewer-section-title">
               <span>Wolf Standings</span>
               <span>Points</span>
-            </div>
-
-            <div className="wolf-turn-banner">
-              <div className="wolf-turn-slot current">
-                <span className="wolf-turn-label">🐺 Wolf</span>
-                <span className="wolf-turn-name">{currentWolf ? currentWolf.name : '—'}</span>
-              </div>
-              <div className="wolf-turn-slot">
-                <span className="wolf-turn-label">Next Up</span>
-                <span className="wolf-turn-name">{nextWolf ? nextWolf.name : 'Final hole'}</span>
-              </div>
             </div>
 
             <div className="scoreboard-card">
