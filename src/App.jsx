@@ -880,11 +880,12 @@ function getPokerRevealMode(round) {
 
 // The showdown spotlights one player at a time, two taps each: one flips
 // their cards face up, the next moves the spotlight on to the next player
-// on deck (face down). The very first player starts on deck for free, and
-// the very last flip needs no further "move on" tap, so N players take
-// 2N - 1 taps in total.
+// on deck (face down). The very first player starts on deck for free, but
+// the last player's flip still gets its own step (announcing the winner is
+// a separate, final tap) so their hand is shown on screen just like
+// everyone else's — so N players take 2N taps in total.
 function getPokerRevealTotalSteps(playerCount) {
-  return Math.max(playerCount * 2 - 1, 0)
+  return Math.max(playerCount * 2, 0)
 }
 
 function calculatePokerSettlement(round, results) {
